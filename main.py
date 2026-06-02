@@ -181,18 +181,31 @@ class App:
                 self.post(lambda: popup.show_error(f"오류: {e}"))
                 return
 
+            log(f"번역결과({cfg.get('target_language')}): {translated[:50]!r}")
             if not translated:
                 self.post(popup.close)
                 return
 
-            # 팝업을 닫고(메인 스레드), 포커스가 대상으로 돌아갈 시간을 준 뒤 주입
-            self.post(popup.close)
-            try:
-                paste_into(target_hwnd, translated)
-            except Exception as e:
-                print("[inject] error:", e)
+            # 순서 보장: 메인 스레드에서 팝업을 '먼저 닫고' → 포커스 복귀 대기 → 주입.
+            # (즉시 주입하면 팝업이 아직 떠 있어 Ctrl+V가 팝업으로 들어가는 경합 발생)
+            self.post(lambda: self._finish_and_paste(popup, target_hwnd, translated))
 
         threading.Thread(target=worker, daemon=True).start()
+
+    def _finish_and_paste(self, popup: Popup, target_hwnd: int, text: str) -> None:
+        """메인 스레드: 팝업을 닫은 뒤, 포커스가 대상으로 돌아가면 주입한다."""
+        popup.close()  # 먼저 확실히 닫아 포커스를 대상 창으로 반환
+        # 주입은 sleep 을 포함하므로 워커 스레드에서, 포커스 복귀 후(150ms) 실행
+        self.root.after(150, lambda: threading.Thread(
+            target=self._paste_worker, args=(target_hwnd, text), daemon=True).start())
+
+    @staticmethod
+    def _paste_worker(target_hwnd: int, text: str) -> None:
+        log(f"주입 시작(hwnd={target_hwnd}): {text[:50]!r}")
+        try:
+            paste_into(target_hwnd, text)
+        except Exception as e:
+            print("[inject] error:", e)
 
     @staticmethod
     def _is_editable(c) -> bool:
@@ -436,6 +449,9 @@ class App:
 
     # --- 실행 ---
     def run(self) -> None:
+        if DEBUG:
+            import inject as _inject
+            _inject.DEBUG = True
         self._register_hotkey()
         self._build_tray()
         self._auto_running = True

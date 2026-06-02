@@ -15,6 +15,13 @@ import pyperclip
 user32 = ctypes.windll.user32
 kernel32 = ctypes.windll.kernel32
 
+DEBUG = False  # main 에서 --debug 시 True 로 설정
+
+
+def _dlog(msg: str) -> None:
+    if DEBUG:
+        print(f"[inject] {msg}", flush=True)
+
 
 def force_foreground(hwnd: int) -> None:
     """주어진 창 핸들을 전경(foreground)으로 가져온다.
@@ -55,15 +62,19 @@ def paste_into(hwnd: int, text: str,
         backup = pyperclip.paste()
     except Exception:
         backup = None
+    _dlog(f"기존 클립보드 backup={backup[:30]!r}" if backup else "기존 클립보드 비어있음")
 
     pyperclip.copy(text)
+    _dlog(f"클립보드에 복사한 번역문={text[:40]!r} / 확인={pyperclip.paste()[:40]!r}")
     force_foreground(hwnd)
     time.sleep(focus_delay)
     keyboard.send("ctrl+v")
+    _dlog(f"Ctrl+V 전송 (hwnd={hwnd}) / 현재 클립보드={pyperclip.paste()[:40]!r}")
     time.sleep(paste_delay)
 
     if backup is not None:
         try:
             pyperclip.copy(backup)
+            _dlog("클립보드 복원 완료")
         except Exception:
             pass

@@ -10,6 +10,7 @@ from tkinter import ttk
 from typing import Callable
 
 from config import LANGUAGES
+from ui import font_family
 
 
 class SettingsWindow:
@@ -26,9 +27,10 @@ class SettingsWindow:
         win.attributes("-topmost", True)
         win.configure(bg="#ffffff")
 
-        LBL = ("Segoe UI", 9)
-        ENT = ("Segoe UI", 9)
-        HINT = ("Segoe UI", 8)
+        fam = font_family(root)
+        LBL = (fam, 9)
+        ENT = (fam, 9)
+        HINT = (fam, 8)
         pad = {"padx": 10, "pady": 3}
         frm = tk.Frame(win, bg="#ffffff")
         frm.pack(fill="both", expand=True, padx=8, pady=6)
