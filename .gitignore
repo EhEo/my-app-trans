@@ -1,0 +1,15 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+build/
+dist/
+
+# 미리보기 이미지(생성물)
+preview_*.png
+
+# IDE
+.vscode/
+.idea/

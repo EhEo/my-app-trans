@@ -1,0 +1,457 @@
+"""한국어 -> 다국어 IME 번역 입력기 — 진입점.
+
+트레이 상주 + 전역 단축키 + 마우스 근처 팝업 + 클립보드 주입.
+
+스레드 모델:
+- tkinter는 메인 스레드에서 mainloop 실행 (숨겨진 root).
+- 전역 단축키(keyboard 스레드), 트레이(pystray 스레드), 번역/주입(워커 스레드)에서
+  발생하는 모든 UI 작업은 thread-safe 큐에 콜백으로 넣고, 메인 스레드의 pump 루프가
+  실행한다. (tkinter는 스레드 안전하지 않으므로 단일 창구로 일원화)
+"""
+from __future__ import annotations
+
+import ctypes
+import os
+import queue
+import sys
+import threading
+import time
+import tkinter as tk
+from ctypes import wintypes
+
+import keyboard
+import mouse
+import pystray
+import uiautomation as auto
+from PIL import Image, ImageDraw
+
+from config import load_config, save_config
+from inject import paste_into
+from popup import Popup
+from settings_window import SettingsWindow
+from translator import TranslationError, translate
+
+user32 = ctypes.windll.user32
+
+
+class GUITHREADINFO(ctypes.Structure):
+    _fields_ = [
+        ("cbSize", wintypes.DWORD),
+        ("flags", wintypes.DWORD),
+        ("hwndActive", wintypes.HWND),
+        ("hwndFocus", wintypes.HWND),
+        ("hwndCapture", wintypes.HWND),
+        ("hwndMenuOwner", wintypes.HWND),
+        ("hwndMoveSize", wintypes.HWND),
+        ("hwndCaret", wintypes.HWND),
+        ("rcCaret", wintypes.RECT),
+    ]
+
+
+DEBUG = "--debug" in sys.argv
+
+# MSAA(legacy IAccessible) state 비트
+ST_READONLY = 0x40
+
+
+def log(msg: str) -> None:
+    if DEBUG:
+        print(f"[{time.strftime('%H:%M:%S')}] {msg}", flush=True)
+
+
+class App:
+    def __init__(self) -> None:
+        self.cfg = load_config()
+        self.q: "queue.Queue" = queue.Queue()
+
+        self.root = tk.Tk()
+        self.root.withdraw()  # 보이지 않는 루트
+
+        self._popup: Popup | None = None
+        self._settings: SettingsWindow | None = None
+        self._hotkey_handle = None
+        self._esc_handle = None  # 팝업 열림 동안의 전역 Esc 핸들
+        self.icon: pystray.Icon | None = None
+
+        # 자동 감지 모드 상태
+        self._auto_running = False
+        self._auto_thread: threading.Thread | None = None
+        self._last_trigger = 0.0
+        self._popup_active = False        # 메인 스레드에서만 갱신 (스레드 안전)
+        self._auto_last_key = None        # 이미 팝업을 띄운 필드 (중복 방지)
+        self._current_field_key = None    # 폴링이 갱신하는 현재 포커스 필드 키
+
+    # --- 메인 스레드 큐 ---
+    def post(self, fn) -> None:
+        """다른 스레드에서 메인 스레드 작업을 예약한다."""
+        self.q.put(fn)
+
+    def _pump(self) -> None:
+        try:
+            while True:
+                fn = self.q.get_nowait()
+                try:
+                    fn()
+                except Exception as e:  # 개별 콜백 오류로 루프가 죽지 않도록
+                    print("[pump] error:", e)
+        except queue.Empty:
+            pass
+        self.root.after(50, self._pump)
+
+    # --- 팝업 / 번역 / 주입 ---
+    def _on_hotkey(self) -> None:
+        """전역 단축키 콜백 (keyboard 스레드에서 실행)."""
+        log("L1: 단축키 감지됨 -> 큐에 show_popup 예약")
+        self.post(self.show_popup)
+
+    def show_popup(self) -> None:
+        # 팝업을 띄우기 직전의 전경 창 = 글을 넣을 대상
+        target_hwnd = user32.GetForegroundWindow()
+        log(f"L3/L4: show_popup 실행 (대상 hwnd={target_hwnd})")
+        if self._popup is not None and self._popup.win.winfo_exists():
+            self._popup.close()
+        # 자동/단축키 어느 경로든: 현재 필드를 '처리됨'으로 기록 → 붙여넣기 후 재팝업 방지
+        self._popup_active = True
+        self._auto_last_key = self._current_field_key
+        self._last_trigger = time.time()
+        self._popup = Popup(
+            self.root,
+            on_submit=lambda text: self._start_translation(self._popup, text, target_hwnd),
+            on_close=self._on_popup_closed,
+        )
+        self._register_esc()  # Esc가 하위 앱(메신저 등)으로 새지 않게 전역 가로채기
+        log("L4: 팝업 생성 완료")
+
+    def _register_esc(self) -> None:
+        """팝업이 열린 동안 Esc를 전역에서 가로채(suppress) 팝업만 닫는다.
+
+        팝업이 키보드 포커스를 못 가졌거나 하위 앱이 Esc를 선점하는 경우에도
+        Esc가 그 앱(메신저 등)으로 전달돼 창이 닫히는 문제를 막는다.
+        """
+        self._unregister_esc()
+        try:
+            self._esc_handle = keyboard.add_hotkey(
+                "esc", lambda: self.post(self._cancel_popup), suppress=True)
+        except Exception as e:
+            log(f"esc 후크 등록 실패: {e}")
+
+    def _unregister_esc(self) -> None:
+        if self._esc_handle is not None:
+            try:
+                keyboard.remove_hotkey(self._esc_handle)
+            except (KeyError, ValueError):
+                pass
+            self._esc_handle = None
+
+    def _cancel_popup(self) -> None:
+        if self._popup is not None and self._popup.win.winfo_exists():
+            self._popup.close()
+
+    def _on_popup_closed(self) -> None:
+        """팝업이 닫힐 때(메인 스레드) 호출 — 자동 감지 재개를 위한 상태 갱신."""
+        self._unregister_esc()
+        self._popup_active = False
+        self._last_trigger = time.time()  # 닫힌 직후 쿨다운(붙여넣기 중 재팝업 방지)
+
+    def _on_click(self, *_args) -> None:
+        """전역 좌클릭 콜백 (mouse 스레드). tkinter 미접촉 — 플래그만 갱신.
+
+        자동 모드에서 입력란을 '다시 클릭'하면 같은 필드라도 팝업이 다시 뜨도록
+        중복방지 키와 쿨다운을 초기화한다. 팝업이 떠 있는 동안의 클릭은 무시하여
+        (예: 팝업 안 클릭, 붙여넣기 직후) 원치 않는 재팝업을 막는다.
+        """
+        if not self.cfg.get("auto_mode") or self._popup_active:
+            return
+        self._auto_last_key = None
+        self._last_trigger = 0.0
+
+    def _start_translation(self, popup: Popup, text: str, target_hwnd: int) -> None:
+        cfg = self.cfg
+
+        def worker() -> None:
+            try:
+                translated = translate(
+                    text, cfg["target_language"],
+                    cfg["openrouter_api_key"], cfg["model"],
+                )
+            except TranslationError as e:
+                self.post(lambda: popup.show_error(str(e)))
+                return
+            except Exception as e:  # 예기치 못한 오류도 사용자에게 표시
+                self.post(lambda: popup.show_error(f"오류: {e}"))
+                return
+
+            if not translated:
+                self.post(popup.close)
+                return
+
+            # 팝업을 닫고(메인 스레드), 포커스가 대상으로 돌아갈 시간을 준 뒤 주입
+            self.post(popup.close)
+            try:
+                paste_into(target_hwnd, translated)
+            except Exception as e:
+                print("[inject] error:", e)
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    @staticmethod
+    def _is_editable(c) -> bool:
+        """컨트롤이 '실제로 편집 가능한 텍스트 입력란'인지 판정.
+
+        타입(Edit/Document) 대신 UIA 패턴으로 본다:
+        - ValuePattern 이 있고 읽기 전용이 아니면 편집 가능 (검색창/주소창/대부분 입력란)
+        - ValuePattern 이 없으면 EditControl 만 편집 가능으로 간주
+        이렇게 하면 읽기 전용 웹페이지(Document)·버튼·탭은 제외되고
+        (탭/아이콘 클릭 시 오발동 방지), ValuePattern 을 노출하는 다양한 앱의
+        입력란은 폭넓게 잡힌다.
+        """
+        # 1) ValuePattern: 가장 명확 (검색창/주소창/대부분 입력란/메모장)
+        try:
+            vp = c.GetValuePattern()
+        except Exception:
+            vp = None
+        if vp is not None:
+            try:
+                return not bool(vp.IsReadOnly)
+            except Exception:
+                return True
+        # 2) 타입/패턴 폴백
+        try:
+            ct = c.ControlType
+        except Exception:
+            return False
+        if ct == auto.ControlType.EditControl:
+            return True
+        # 일부 채팅/에디터 입력은 TextControl + TextPattern 으로만 노출됨.
+        # 읽기전용(라벨·읽기전용 본문)은 제외 → 페이지/탭 오발동 방지.
+        if ct == auto.ControlType.TextControl:
+            try:
+                if c.GetTextPattern() is None:
+                    return False
+            except Exception:
+                return False
+            try:
+                lg = c.GetLegacyIAccessiblePattern()
+                if (getattr(lg, "State", 0) or 0) & ST_READONLY:
+                    return False
+            except Exception:
+                pass
+            return True
+        return False
+
+    @staticmethod
+    def _field_key(c):
+        """포커스된 컨트롤의 안정적인 식별자. RuntimeId 우선(붙여넣기에도 불변)."""
+        try:
+            rid = c.GetRuntimeId()
+            if rid:
+                return ("rid", tuple(rid))
+        except Exception:
+            pass
+        try:
+            return ("hwnd", c.ProcessId, c.NativeWindowHandle)
+        except Exception:
+            return None
+
+    # --- 자동 감지 모드 (텍스트 입력란 포커스 시 자동 팝업) ---
+    def _auto_loop(self) -> None:
+        """백그라운드 폴링: 편집 가능한 컨트롤이 포커스되면 팝업을 띄운다.
+
+        스레드 안전: 이 메서드는 tkinter 객체를 절대 만지지 않는다. 팝업 상태는
+        메인 스레드가 갱신하는 self._popup_active(bool)만 읽고, 실제 팝업 생성은
+        self.post()로 메인 스레드에 위임한다.
+
+        - 자기 프로세스(팝업) 이벤트는 무시 → 무한 루프 방지
+        - 같은 필드는 한 번만 트리거 (비편집 영역으로 갔다 와야 재트리거)
+        - 팝업이 떠 있거나 직후(쿨다운)에는 트리거하지 않음
+        - 단축키 경로와 키 추적을 공유 → 붙여넣기 후 같은 필드 재팝업 방지
+        """
+        my_pid = os.getpid()
+        with auto.UIAutomationInitializerInThread(debug=False):
+            auto.SetGlobalSearchTimeout(0.5)
+            while self._auto_running:
+                time.sleep(0.4)
+                if not self.cfg.get("auto_mode"):
+                    self._current_field_key = None
+                    self._auto_last_key = None
+                    continue
+                try:
+                    c = auto.GetFocusedControl()
+                except Exception:
+                    continue
+                if self._evaluate_focus(c, my_pid, time.time()):
+                    log(f"AUTO: 입력란 감지 {c.ControlTypeName} pid={c.ProcessId} -> 팝업")
+                    self.post(self.show_popup)
+
+    def _caret_key(self, my_pid: int):
+        """전경 창에 텍스트 캐럿(시스템 커서)이 있으면 그 필드 키를 반환.
+
+        UIA가 입력란을 노출하지 않는 앱(WeChat 등)에서도 '커서가 있으면 입력 중'을
+        감지하는 폴백. 자기 프로세스(팝업)·캐럿 없음·읽기전용 페이지(커서 없음)는 제외.
+        """
+        try:
+            fg = user32.GetForegroundWindow()
+            if not fg:
+                return None
+            pid = wintypes.DWORD()
+            tid = user32.GetWindowThreadProcessId(fg, ctypes.byref(pid))
+            if not tid or pid.value == my_pid:
+                return None
+            info = GUITHREADINFO()
+            info.cbSize = ctypes.sizeof(GUITHREADINFO)
+            if not user32.GetGUIThreadInfo(tid, ctypes.byref(info)):
+                return None
+            if not info.hwndCaret:
+                return None
+            return ("caret", int(fg), int(info.hwndCaret))
+        except Exception:
+            return None
+
+    def _detect(self, c, my_pid: int):
+        """(editable, key) 반환. UIA 우선, 실패 시 캐럿 폴백.
+
+        우리 팝업(자기 프로세스)이 포커스면 None 반환 → 호출자는 상태를 건드리지
+        않고 무시한다(무한 루프 방지).
+        """
+        try:
+            if c and c.ProcessId == my_pid:
+                return None
+        except Exception:
+            pass
+        try:
+            if c and self._is_editable(c):
+                return True, self._field_key(c)
+        except Exception:
+            pass
+        ckey = self._caret_key(my_pid)
+        if ckey is not None:
+            return True, ckey
+        return False, None
+
+    def _apply_focus(self, editable: bool, key, now: float) -> bool:
+        """(editable, key)로 팝업 트리거 여부 결정 + 상태 갱신 (순수 로직, 테스트 대상)."""
+        if not editable:
+            self._current_field_key = None
+            self._auto_last_key = None
+            return False
+        self._current_field_key = key  # 단축키 경로가 읽을 수 있게 기록
+        if self._popup_active or (now - self._last_trigger < 1.0):
+            return False
+        if key is None or key == self._auto_last_key:
+            return False
+        self._auto_last_key = key
+        self._last_trigger = now
+        return True
+
+    def _evaluate_focus(self, c, my_pid: int, now: float) -> bool:
+        """포커스된 컨트롤을 평가해 팝업을 띄울지 결정하고 상태를 갱신한다.
+
+        UIA(_is_editable) → 캐럿(_caret_key) 폴백 순으로 입력란을 판정한다.
+        True 면 호출자가 메인 스레드에 show_popup 을 위임한다.
+        """
+        det = self._detect(c, my_pid)
+        if det is None:
+            return False  # 우리 팝업이 포커스 → 상태 유지하고 무시
+        editable, key = det
+        return self._apply_focus(editable, key, now)
+
+    # --- 설정 ---
+    def show_settings(self) -> None:
+        if self._settings is not None and self._settings.win.winfo_exists():
+            self._settings.win.lift()
+            self._settings.win.focus_force()
+            return
+        self._settings = SettingsWindow(self.root, self.cfg, on_save=self.apply_settings)
+
+    def apply_settings(self, new_cfg: dict) -> str:
+        """설정을 적용하고 결과 메시지를 돌려준다(설정창에 표시됨)."""
+        old_hotkey = self.cfg.get("hotkey")
+        self.cfg = new_cfg
+        save_config(new_cfg)
+
+        if new_cfg.get("hotkey") == old_hotkey:
+            return "저장되었습니다."
+
+        if self._register_hotkey():
+            return f"저장됨 · 단축키: {new_cfg.get('hotkey')}"
+
+        # 새 단축키 등록 실패 → 이전 단축키로 자동 복구 (단축키가 없어지지 않게)
+        bad = new_cfg.get("hotkey")
+        self.cfg = dict(new_cfg, hotkey=old_hotkey)
+        save_config(self.cfg)
+        self._register_hotkey()
+        return f"'{bad}' 등록 실패(충돌/형식 오류) → 이전 '{old_hotkey}' 유지"
+
+    # --- 전역 단축키 ---
+    def _register_hotkey(self) -> bool:
+        """현재 설정의 단축키를 등록한다. 성공 여부를 반환."""
+        if self._hotkey_handle is not None:
+            try:
+                keyboard.remove_hotkey(self._hotkey_handle)
+            except (KeyError, ValueError):
+                pass
+            self._hotkey_handle = None
+        hk = self.cfg.get("hotkey") or "ctrl+alt+space"
+        try:
+            self._hotkey_handle = keyboard.add_hotkey(hk, self._on_hotkey)
+            log(f"단축키 '{hk}' 등록 성공")
+            return True
+        except Exception as e:
+            print(f"[hotkey] '{hk}' 등록 실패: {e}")
+            if self.icon is not None:
+                self.icon.notify(f"단축키 '{hk}' 등록 실패", "번역 입력기")
+            return False
+
+    # --- 트레이 ---
+    def _make_icon_image(self) -> Image.Image:
+        img = Image.new("RGB", (64, 64), "#1e1e1e")
+        d = ImageDraw.Draw(img)
+        d.ellipse((6, 6, 58, 58), fill="#4da3ff")
+        d.text((20, 18), "역", fill="#1e1e1e")
+        return img
+
+    def _build_tray(self) -> None:
+        menu = pystray.Menu(
+            pystray.MenuItem("설정 열기", lambda: self.post(self.show_settings)),
+            pystray.MenuItem("종료", lambda: self.post(self.quit)),
+        )
+        self.icon = pystray.Icon(
+            "my-app-trans", self._make_icon_image(), "번역 입력기", menu)
+        threading.Thread(target=self.icon.run, daemon=True).start()
+
+    # --- 종료 ---
+    def quit(self) -> None:
+        self._auto_running = False
+        try:
+            keyboard.unhook_all()
+        except Exception:
+            pass
+        try:
+            mouse.unhook_all()
+        except Exception:
+            pass
+        if self.icon is not None:
+            self.icon.stop()
+        self.root.quit()
+
+    # --- 실행 ---
+    def run(self) -> None:
+        self._register_hotkey()
+        self._build_tray()
+        self._auto_running = True
+        self._auto_thread = threading.Thread(target=self._auto_loop, daemon=True)
+        self._auto_thread.start()
+        try:
+            mouse.on_button(self._on_click, buttons=("left",), types=("down",))
+        except Exception as e:
+            print(f"[mouse] 클릭 감지 등록 실패: {e}")
+        self.root.after(50, self._pump)
+        if not self.cfg.get("openrouter_api_key"):
+            print("경고: OpenRouter API 키가 설정되어 있지 않습니다. 트레이 > 설정에서 입력하세요.")
+        auto_on = "켜짐" if self.cfg.get("auto_mode") else "꺼짐"
+        print(f"번역 입력기 실행 중. 단축키: {self.cfg.get('hotkey')} | 목표 언어: {self.cfg.get('target_language')} | 자동감지: {auto_on}")
+        self.root.mainloop()
+
+
+if __name__ == "__main__":
+    App().run()
