@@ -1,0 +1,130 @@
+"""번역입력기 설치 프로그램.
+
+이 exe 안에 포함된 앱 본체(번역입력기.exe)를 현재 사용자 폴더에 복사하고,
+바탕화면과 시작프로그램(Startup) 폴더에 '번역입력기' 바로가기를 만든다.
+
+- 관리자 권한 불필요: 모든 작업을 현재 사용자 영역에서 수행한다.
+- 시작프로그램 폴더 바로가기 → Windows 로그인 시 자동 실행.
+
+환경변수 TRANS_INSTALL_SILENT=1 이면 메시지박스/자동실행 없이 조용히 설치한다
+(자동 검증용). 성공 시 종료코드 0, 실패 시 1.
+"""
+from __future__ import annotations
+
+import ctypes
+import os
+import shutil
+import sys
+from pathlib import Path
+
+APP_EXE = "번역입력기.exe"
+SHORTCUT_NAME = "번역입력기"          # 바로가기 이름(.lnk 제외)
+INSTALL_SUBDIR = "번역입력기"          # %LOCALAPPDATA%\Programs\<여기>
+
+SILENT = os.environ.get("TRANS_INSTALL_SILENT") == "1"
+
+
+def msgbox(text: str, icon: int = 0x40) -> None:
+    """안내 메시지박스. icon: 0x40=정보, 0x10=오류, 0x30=경고."""
+    if SILENT:
+        return
+    # 0x10000=MB_SETFOREGROUND, 0x40000=MB_TOPMOST
+    ctypes.windll.user32.MessageBoxW(0, text, "번역입력기 설치",
+                                     icon | 0x10000 | 0x40000)
+
+
+def resource_path(name: str) -> str:
+    """번들된 리소스 경로. PyInstaller onefile 은 sys._MEIPASS 에 풀린다.
+
+    개발 중(비동결) 에는 dist\\ 아래의 빌드 산출물을 사용한다.
+    """
+    base = getattr(sys, "_MEIPASS", None)
+    if base:
+        return os.path.join(base, name)
+    return os.path.join(os.path.dirname(os.path.abspath(__file__)), "dist", name)
+
+
+def _special_folder(shell, key: str, fallback: str) -> str:
+    """WScript.Shell 의 특수폴더 경로(OneDrive 리디렉션 등 반영). 실패 시 fallback."""
+    try:
+        p = str(shell.SpecialFolders(key))
+        if p:
+            return p
+    except Exception:
+        pass
+    return fallback
+
+
+def _create_shortcut(shell, lnk_path: Path, target: Path, workdir: Path) -> None:
+    sc = shell.CreateShortcut(str(lnk_path))
+    sc.TargetPath = str(target)
+    sc.WorkingDirectory = str(workdir)
+    sc.IconLocation = f"{target},0"
+    sc.Description = SHORTCUT_NAME
+    sc.Save()
+
+
+def main() -> int:
+    if os.name != "nt":
+        msgbox("이 설치 프로그램은 Windows 전용입니다.", icon=0x10)
+        return 1
+
+    # 1) 앱 본체 복사
+    local = Path(os.environ.get("LOCALAPPDATA", str(Path.home())))
+    install_dir = local / "Programs" / INSTALL_SUBDIR
+    install_dir.mkdir(parents=True, exist_ok=True)
+    dst = install_dir / APP_EXE
+    try:
+        shutil.copy2(resource_path(APP_EXE), dst)
+    except PermissionError:
+        msgbox("앱이 실행 중인 것 같습니다.\n트레이에서 '종료' 후 다시 설치해주세요.",
+               icon=0x30)
+        return 1
+    except OSError as e:
+        msgbox(f"파일 복사 실패:\n{e}", icon=0x10)
+        return 1
+
+    # 2) 바로가기 생성 (바탕화면 + 시작프로그램)
+    import comtypes.client
+    shell = comtypes.client.CreateObject("WScript.Shell", dynamic=True)
+
+    desktop = Path(_special_folder(
+        shell, "Desktop",
+        os.path.join(os.environ.get("USERPROFILE", ""), "Desktop")))
+    startup = Path(_special_folder(
+        shell, "Startup",
+        os.path.join(os.environ.get("APPDATA", ""),
+                     r"Microsoft\Windows\Start Menu\Programs\Startup")))
+
+    made = []
+    for folder in (desktop, startup):
+        try:
+            folder.mkdir(parents=True, exist_ok=True)
+            _create_shortcut(shell, folder / f"{SHORTCUT_NAME}.lnk",
+                             dst, install_dir)
+            made.append(str(folder / f"{SHORTCUT_NAME}.lnk"))
+        except Exception as e:  # 한쪽 실패해도 설치 자체는 진행
+            print(f"[경고] 바로가기 생성 실패({folder}): {e}", flush=True)
+
+    print(f"설치 위치: {dst}", flush=True)
+    for m in made:
+        print(f"바로가기: {m}", flush=True)
+
+    msgbox(
+        f"설치가 완료되었습니다.\n\n"
+        f"설치 위치:\n{dst}\n\n"
+        f"바탕화면 바로가기와 시작프로그램(로그인 시 자동 실행) 등록 완료.",
+        icon=0x40,
+    )
+
+    # 3) 설치 직후 한 번 실행(자동) — silent 모드에서는 생략
+    if not SILENT:
+        try:
+            os.startfile(str(dst))
+        except Exception:
+            pass
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

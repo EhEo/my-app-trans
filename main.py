@@ -23,7 +23,7 @@ import keyboard
 import mouse
 import pystray
 import uiautomation as auto
-from PIL import Image, ImageDraw
+from PIL import Image, ImageDraw, ImageFont
 
 from config import load_config, save_config
 from inject import paste_into
@@ -32,6 +32,26 @@ from settings_window import SettingsWindow
 from translator import TranslationError, translate
 
 user32 = ctypes.windll.user32
+kernel32 = ctypes.windll.kernel32
+
+# 단일 인스턴스 보장용 뮤텍스 핸들 — 프로세스가 살아있는 동안 열어 두기 위해
+# 모듈 전역으로 참조를 유지한다(닫히면 다른 인스턴스가 실행될 수 있음).
+_instance_mutex = None
+
+
+def acquire_single_instance(name: str = "my-app-trans-singleton") -> bool:
+    """이 프로세스가 첫 인스턴스이면 True, 이미 실행 중이면 False.
+
+    명명된 뮤텍스를 만든다. 같은 이름의 뮤텍스가 이미 있으면
+    (다른 인스턴스가 실행 중이면) GetLastError 가 ERROR_ALREADY_EXISTS 다.
+    프로세스 종료 시 뮤텍스는 OS가 자동 해제한다.
+    """
+    global _instance_mutex
+    ERROR_ALREADY_EXISTS = 183
+    kernel32.CreateMutexW.restype = wintypes.HANDLE
+    kernel32.CreateMutexW.argtypes = [wintypes.LPVOID, wintypes.BOOL, wintypes.LPCWSTR]
+    _instance_mutex = kernel32.CreateMutexW(None, False, name)
+    return kernel32.GetLastError() != ERROR_ALREADY_EXISTS
 
 
 class GUITHREADINFO(ctypes.Structure):
@@ -416,11 +436,40 @@ class App:
             return False
 
     # --- 트레이 ---
+    @staticmethod
+    def _icon_font(size: int) -> ImageFont.FreeTypeFont:
+        """한글+라틴을 또렷하게 그릴 TrueType 글꼴을 로드한다.
+
+        Windows 기본 탑재 글꼴(맑은 고딕 → Segoe UI)을 순서대로 시도하고,
+        모두 실패하면 PIL 기본 비트맵 글꼴로 떨어진다.
+        """
+        win = os.environ.get("WINDIR", r"C:\Windows")
+        for name in ("malgunbd.ttf", "malgun.ttf", "segoeuib.ttf", "segoeui.ttf"):
+            try:
+                return ImageFont.truetype(os.path.join(win, "Fonts", name), size)
+            except OSError:
+                continue
+        return ImageFont.load_default()
+
     def _make_icon_image(self) -> Image.Image:
-        img = Image.new("RGB", (64, 64), "#1e1e1e")
+        """번역기 아이콘 — 겹친 두 카드에 '가'와 'A'를 새긴 형태.
+
+        고해상도(256px)로 그려 트레이에서 축소될 때 매끄럽게 보이게 한다.
+        """
+        S = 256
+        img = Image.new("RGBA", (S, S), (0, 0, 0, 0))
         d = ImageDraw.Draw(img)
-        d.ellipse((6, 6, 58, 58), fill="#4da3ff")
-        d.text((20, 18), "역", fill="#1e1e1e")
+        blue = "#1a73e8"
+        font = self._icon_font(86)
+
+        # 뒤 카드(파랑) + 한글 '가'
+        d.rounded_rectangle((24, 24, 150, 150), radius=24, fill=blue)
+        d.text((87, 90), "가", font=font, fill="#ffffff", anchor="mm")
+
+        # 앞 카드(흰색, 파란 테두리) + 라틴 'A'
+        d.rounded_rectangle((106, 106, 232, 232), radius=24,
+                            fill="#ffffff", outline=blue, width=6)
+        d.text((169, 172), "A", font=font, fill=blue, anchor="mm")
         return img
 
     def _build_tray(self) -> None:
@@ -470,4 +519,14 @@ class App:
 
 
 if __name__ == "__main__":
+    if not acquire_single_instance():
+        # 이미 실행 중 — 콘솔이 없으므로 메시지박스로 알리고 종료한다.
+        # 0x40=MB_ICONINFORMATION, 0x10000=MB_SETFOREGROUND, 0x40000=MB_TOPMOST
+        user32.MessageBoxW(
+            0,
+            "번역 입력기가 이미 실행 중입니다.\n작업 표시줄의 트레이 아이콘을 확인하세요.",
+            "번역 입력기",
+            0x40 | 0x10000 | 0x40000,
+        )
+        sys.exit(0)
     App().run()

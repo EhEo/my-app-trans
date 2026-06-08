@@ -22,7 +22,7 @@ class SettingsWindow:
         win = tk.Toplevel(root)
         self.win = win
         win.title("번역 입력기 설정")
-        win.geometry("420x250")
+        win.geometry("420x320")
         win.resizable(False, False)
         win.attributes("-topmost", True)
         win.configure(bg="#ffffff")
@@ -72,10 +72,11 @@ class SettingsWindow:
         self.msg.grid(row=6, column=0, columnspan=2, sticky="w", padx=10, pady=(6, 0))
 
         btns = tk.Frame(win, bg="#ffffff")
-        btns.pack(fill="x", padx=12, pady=8)
-        tk.Button(btns, text="저장", width=8, command=self._save).pack(side="right")
-        tk.Button(btns, text="닫기", width=8, command=self.close).pack(
-            side="right", padx=6)
+        btns.pack(side="bottom", fill="x", padx=12, pady=8)
+        tk.Button(btns, text="저장", width=8, font=LBL,
+                  command=self._save).pack(side="right")
+        tk.Button(btns, text="닫기", width=8, font=LBL,
+                  command=self.close).pack(side="right", padx=6)
 
         frm.columnconfigure(1, weight=1)
         win.lift()

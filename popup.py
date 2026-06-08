@@ -81,18 +81,27 @@ class Popup:
         win.geometry(f"+{x + 12}+{y + 16}")
 
         # 안쪽 카드만 둥근 모서리: Canvas 위에 둥근 사각형을 그리고 내용을 임베드
-        pad = 8  # 카드 안쪽 여백
+        self.pad = 8  # 카드 안쪽 여백
         canvas = tk.Canvas(win, bg=OUTER, highlightthickness=0)
         canvas.pack()
+        self.canvas = canvas
+        # 크기/위치는 전적으로 geometry() 로만 제어한다(자동 전파가 위쪽 성장을
+        # 덮어쓰지 않도록). 창 크기는 아래에서 명시적으로 지정한다.
+        win.pack_propagate(False)
 
         # 내용은 canvas 의 자식으로 만들어 임베드 렌더링을 보장
         content = tk.Frame(canvas, bg=BG)
+        self.content = content
 
-        self.entry = tk.Entry(content, width=32, font=(fam, 10),
-                              bg="#ffffff", fg=FG, insertbackground=FG,
-                              relief="solid", bd=1,
-                              highlightthickness=0)
-        self.entry.pack(fill="x", ipady=3)
+        # 멀티라인 입력란: 자동 줄바꿈(wrap)으로 두 줄 이상이 되면 높이를 키운다.
+        # (단일행 Entry 의 1.5배 너비 = 48자). MAX_LINES 까지 자란다.
+        self.MAX_LINES = 6
+        self._cur_lines = 1
+        self.text = tk.Text(content, width=48, height=1, font=(fam, 10),
+                            wrap="word", bg="#ffffff", fg=FG,
+                            insertbackground=FG, relief="solid", bd=1,
+                            highlightthickness=0, padx=4, pady=2, undo=True)
+        self.text.pack(fill="x")
 
         bottom = tk.Frame(content, bg=BG)
         bottom.pack(fill="x", pady=(3, 0))
@@ -103,20 +112,32 @@ class Popup:
         self.status.pack(side="left", fill="x", expand=True)
 
         content.update_idletasks()
-        cw = content.winfo_reqwidth() + 2 * pad
-        ch = content.winfo_reqheight() + 2 * pad
+        cw = content.winfo_reqwidth() + 2 * self.pad
+        ch = content.winfo_reqheight() + 2 * self.pad
         canvas.config(width=cw, height=ch)
-        canvas.create_polygon(
+        self._poly = canvas.create_polygon(
             _round_rect_points(0, 0, cw - 1, ch - 1, CORNER_RADIUS),
             smooth=True, fill=BG, outline=CARD_OUTLINE)
-        canvas.create_window(pad, pad, anchor="nw", window=content)
+        self._embed = canvas.create_window(self.pad, self.pad, anchor="nw",
+                                           window=content)
 
-        win.bind("<Return>", self._submit)
+        # 위로 자라게 하려면 '아래 모서리'의 화면상 위치를 고정 기준으로 둔다.
+        # 높이가 늘면 그만큼 창의 top 을 위로 올려 bottom 을 유지한다.
+        self._x = x + 12
+        self._bottom = (y + 16) + ch
+        win.geometry(f"{cw}x{ch}+{self._x}+{y + 16}")
+
+        # Enter = 제출(줄바꿈 삽입 안 함), Shift+Enter = 수동 줄바꿈
+        self.text.bind("<Return>", self._submit)
+        self.text.bind("<KP_Enter>", self._submit)
+        self.text.bind("<Shift-Return>", self._on_shift_return)
         win.bind("<Escape>", lambda e: self.close())
         win.bind("<FocusOut>", self._on_focus_out)
+        # 입력 변화 시 줄 수에 맞춰 입력란 높이를 위로 키운다.
+        self.text.bind("<KeyRelease>", self._auto_grow)
         # 한글 조합 중 글꼴/크기가 위젯과 다르게 보이는 문제 방지:
         # IME 조합 글꼴을 입력칸 글꼴과 동일하게 지정
-        self.entry.bind("<FocusIn>", self._apply_ime_font)
+        self.text.bind("<FocusIn>", self._apply_ime_font)
 
         win.update_idletasks()
         win.deiconify()
@@ -150,7 +171,7 @@ class Popup:
         self.win.lift()
         self.win.attributes("-topmost", True)
         self.win.focus_force()
-        self.entry.focus_set()
+        self.text.focus_set()
         self._apply_ime_font()
 
     def _apply_ime_font(self, *_event) -> None:
@@ -168,13 +189,57 @@ class Popup:
             lf.lfWeight = 400
             lf.lfCharSet = 1  # DEFAULT_CHARSET (Pretendard가 한글 포함)
             lf.lfFaceName = self.fam[:31]
-            hwnd = self.entry.winfo_id()
+            hwnd = self.text.winfo_id()
             himc = _imm32.ImmGetContext(hwnd)
             if himc:
                 _imm32.ImmSetCompositionFontW(himc, ctypes.byref(lf))
                 _imm32.ImmReleaseContext(hwnd, himc)
         except Exception:
             pass
+
+    def _on_shift_return(self, _event=None):
+        # 수동 줄바꿈은 기본 동작(개행 삽입)을 허용한 뒤 높이를 다시 맞춘다.
+        self.win.after(1, self._auto_grow)
+        return None
+
+    def _auto_grow(self, _event=None) -> None:
+        """입력 줄 수(자동 줄바꿈 포함)에 맞춰 입력란 높이를 조정한다."""
+        if not self.win.winfo_exists():
+            return
+        try:
+            self.text.update_idletasks()
+            cnt = self.text.count("1.0", "end-1c", "displaylines")
+        except Exception:
+            return
+        if isinstance(cnt, (tuple, list)):
+            n = cnt[0] if cnt else 0
+        else:
+            n = cnt or 0
+        lines = max(1, min(self.MAX_LINES, int(n) + 1))
+        if lines == self._cur_lines:
+            return
+        self._cur_lines = lines
+        self.text.configure(height=lines)
+        self._relayout()
+
+    def _relayout(self) -> None:
+        """입력란 높이 변화에 맞춰 둥근 카드/창 크기를 다시 그리고,
+        아래 모서리를 고정한 채 창을 위로 키운다."""
+        if not self.win.winfo_exists():
+            return
+        self.content.update_idletasks()
+        cw = self.content.winfo_reqwidth() + 2 * self.pad
+        ch = self.content.winfo_reqheight() + 2 * self.pad
+        self.canvas.config(width=cw, height=ch)
+        self.canvas.coords(
+            self._poly,
+            *_round_rect_points(0, 0, cw - 1, ch - 1, CORNER_RADIUS))
+        # canvas 크기 변경이 예약한 geometry 전파를 먼저 소진시킨 뒤,
+        # 위치(위로 성장)를 마지막에 확정해야 전파가 top 을 되돌리지 못한다.
+        self.win.update_idletasks()
+        new_y = max(0, self._bottom - ch)   # bottom 고정 → 위로 성장
+        self.win.geometry(f"{cw}x{ch}+{self._x}+{new_y}")
+        self.win.update_idletasks()
 
     def _mark_ready(self) -> None:
         self._ready = True
@@ -185,17 +250,19 @@ class Popup:
         if self._ready and not self._submitted:
             self.close()
 
-    def _submit(self, _event=None) -> None:
+    def _submit(self, _event=None) -> str:
+        # "break" 를 돌려 Text 기본 동작(개행 삽입)을 막고 제출로만 처리한다.
         if self._submitted:
-            return
-        text = self.entry.get().strip()
+            return "break"
+        text = self.text.get("1.0", "end-1c").strip()
         if not text:
             self.close()
-            return
+            return "break"
         self._submitted = True
-        self.entry.configure(state="disabled")
+        self.text.configure(state="disabled")
         self.set_status("번역 중...", ACCENT)
         self.on_submit(text)
+        return "break"
 
     def set_status(self, message: str, color: str = ACCENT) -> None:
         if self.win.winfo_exists():
@@ -206,8 +273,8 @@ class Popup:
         if not self.win.winfo_exists():
             return
         self._submitted = False
-        self.entry.configure(state="normal")
-        self.entry.focus_set()
+        self.text.configure(state="normal")
+        self.text.focus_set()
         self.set_status(message, ERR)
 
     def close(self) -> None:
