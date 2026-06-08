@@ -26,13 +26,24 @@ import uiautomation as auto
 from PIL import Image, ImageDraw, ImageFont
 
 from config import load_config, save_config
-from inject import paste_into
+from inject import paste_into, release_modifiers
 from popup import Popup
 from settings_window import SettingsWindow
 from translator import TranslationError, translate
 
 user32 = ctypes.windll.user32
 kernel32 = ctypes.windll.kernel32
+
+# 단일 인스턴스 체크: OpenMutex 먼저 시도 → 존재하면 다른 인스턴스, 없으면 CreateMutex.
+# (GetLastError 기반 판정은 PyInstaller onefile 환경에서 errno 가 reset 되어
+#  중복 감지를 놓친다. OpenMutex 의 NULL/HANDLE 반환은 errno 와 무관해 안정적.)
+_k32 = ctypes.WinDLL("kernel32", use_last_error=True)
+_k32.CreateMutexW.restype = wintypes.HANDLE
+_k32.CreateMutexW.argtypes = [wintypes.LPVOID, wintypes.BOOL, wintypes.LPCWSTR]
+_k32.OpenMutexW.restype = wintypes.HANDLE
+_k32.OpenMutexW.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.LPCWSTR]
+_k32.CloseHandle.restype = wintypes.BOOL
+_k32.CloseHandle.argtypes = [wintypes.HANDLE]
 
 # 단일 인스턴스 보장용 뮤텍스 핸들 — 프로세스가 살아있는 동안 열어 두기 위해
 # 모듈 전역으로 참조를 유지한다(닫히면 다른 인스턴스가 실행될 수 있음).
@@ -42,16 +53,28 @@ _instance_mutex = None
 def acquire_single_instance(name: str = "my-app-trans-singleton") -> bool:
     """이 프로세스가 첫 인스턴스이면 True, 이미 실행 중이면 False.
 
-    명명된 뮤텍스를 만든다. 같은 이름의 뮤텍스가 이미 있으면
-    (다른 인스턴스가 실행 중이면) GetLastError 가 ERROR_ALREADY_EXISTS 다.
-    프로세스 종료 시 뮤텍스는 OS가 자동 해제한다.
+    원자성 보장: OpenMutexW 는 빠른-실패 최적화일 뿐, 실제 race-free 판정은
+    CreateMutexW 의 GetLastError(ERROR_ALREADY_EXISTS) 로 한다. 두 프로세스가
+    동시에 출발해도 OS 는 둘 중 하나에만 새 mutex 를 만들어 주고, 진 쪽은
+    ALREADY_EXISTS 를 돌려받는다.
     """
     global _instance_mutex
+    SYNCHRONIZE = 0x00100000
     ERROR_ALREADY_EXISTS = 183
-    kernel32.CreateMutexW.restype = wintypes.HANDLE
-    kernel32.CreateMutexW.argtypes = [wintypes.LPVOID, wintypes.BOOL, wintypes.LPCWSTR]
-    _instance_mutex = kernel32.CreateMutexW(None, False, name)
-    return kernel32.GetLastError() != ERROR_ALREADY_EXISTS
+
+    # 빠른 경로: 이미 다른 인스턴스가 있으면 즉시 종료
+    existing = _k32.OpenMutexW(SYNCHRONIZE, False, name)
+    if existing:
+        _k32.CloseHandle(existing)
+        return False
+
+    # 원자적 경로: 생성과 동시에 이미 있었는지 검사 (race 안전)
+    _instance_mutex = _k32.CreateMutexW(None, False, name)
+    if not _instance_mutex:
+        return False
+    if ctypes.get_last_error() == ERROR_ALREADY_EXISTS:
+        return False
+    return True
 
 
 class GUITHREADINFO(ctypes.Structure):
@@ -100,6 +123,9 @@ class App:
         self._popup_active = False        # 메인 스레드에서만 갱신 (스레드 안전)
         self._auto_last_key = None        # 이미 팝업을 띄운 필드 (중복 방지)
         self._current_field_key = None    # 폴링이 갱신하는 현재 포커스 필드 키
+        # 단축키 재진입 방지 — 콜백 진입 즉시 set, 팝업 닫힐 때 clear.
+        # 키 자동반복으로 콜백이 큐잉되어 두 번째 콜이 첫 팝업을 target 으로 잡는 버그 방지.
+        self._hotkey_inflight = False
 
     # --- 메인 스레드 큐 ---
     def post(self, fn) -> None:
@@ -120,7 +146,25 @@ class App:
 
     # --- 팝업 / 번역 / 주입 ---
     def _on_hotkey(self) -> None:
-        """전역 단축키 콜백 (keyboard 스레드에서 실행)."""
+        """전역 단축키 콜백 (keyboard 스레드에서 실행).
+
+        재진입 가드: 키 자동반복이나 이미 떠 있는 팝업 상황에서 콜백이
+        중복 큐잉되어 두 번째 콜이 첫 팝업을 target 으로 잡는 버그를 막는다.
+        modifier 가 떼지기를 짧게 기다린 뒤 (auto-repeat 으로 다시 down 되는 것 방지)
+        메인 스레드로 한 번만 show_popup 을 예약한다.
+        """
+        if self._hotkey_inflight or self._popup_active:
+            log("L1: 단축키 무시 (이미 in-flight 또는 팝업 활성)")
+            return
+        self._hotkey_inflight = True
+        deadline = time.time() + 0.5
+        while time.time() < deadline:
+            ctrl = user32.GetAsyncKeyState(0x11) & 0x8000
+            alt = user32.GetAsyncKeyState(0x12) & 0x8000
+            shift = user32.GetAsyncKeyState(0x10) & 0x8000
+            if not (ctrl or alt or shift):
+                break
+            time.sleep(0.02)
         log("L1: 단축키 감지됨 -> 큐에 show_popup 예약")
         self.post(self.show_popup)
 
@@ -128,6 +172,9 @@ class App:
         # 팝업을 띄우기 직전의 전경 창 = 글을 넣을 대상
         target_hwnd = user32.GetForegroundWindow()
         log(f"L3/L4: show_popup 실행 (대상 hwnd={target_hwnd})")
+        # 단축키의 Ctrl/Alt 가 OS 상태에 남아 있으면 팝업 입력란에서
+        # 한글 첫 글자가 단축키로 가로채여 입력이 안 된다. 먼저 강제 해제.
+        release_modifiers()
         if self._popup is not None and self._popup.win.winfo_exists():
             self._popup.close()
         # 자동/단축키 어느 경로든: 현재 필드를 '처리됨'으로 기록 → 붙여넣기 후 재팝업 방지
@@ -172,6 +219,7 @@ class App:
         self._unregister_esc()
         self._popup_active = False
         self._last_trigger = time.time()  # 닫힌 직후 쿨다운(붙여넣기 중 재팝업 방지)
+        self._hotkey_inflight = False     # 다음 단축키 콜백 허용
 
     def _on_click(self, *_args) -> None:
         """전역 좌클릭 콜백 (mouse 스레드). tkinter 미접촉 — 플래그만 갱신.
@@ -426,8 +474,12 @@ class App:
             self._hotkey_handle = None
         hk = self.cfg.get("hotkey") or "ctrl+alt+space"
         try:
-            self._hotkey_handle = keyboard.add_hotkey(hk, self._on_hotkey)
-            log(f"단축키 '{hk}' 등록 성공")
+            # suppress=True: hotkey 구성 키들을 OS 로 전달하지 않는다.
+            # 이렇게 하면 OS 는 사용자가 Ctrl+Alt+Z 를 누른 적이 없는 상태가 되어,
+            # 다음에 오는 한글 키가 단축키로 해석되지 않고 일반 입력으로 들어간다.
+            self._hotkey_handle = keyboard.add_hotkey(
+                hk, self._on_hotkey, suppress=True)
+            log(f"단축키 '{hk}' 등록 성공 (suppress=True)")
             return True
         except Exception as e:
             print(f"[hotkey] '{hk}' 등록 실패: {e}")
