@@ -25,7 +25,7 @@ import pystray
 import uiautomation as auto
 from PIL import Image, ImageDraw, ImageFont
 
-from config import load_config, save_config
+from config import LANGUAGES, load_config, save_config
 from inject import paste_into, release_modifiers
 from popup import Popup
 from settings_window import SettingsWindow
@@ -185,6 +185,9 @@ class App:
             self.root,
             on_submit=lambda text: self._start_translation(self._popup, text, target_hwnd),
             on_close=self._on_popup_closed,
+            languages=list(LANGUAGES.keys()),
+            language=self.cfg.get("target_language", "영어"),
+            on_language_change=self._set_target_language,
         )
         self._register_esc()  # Esc가 하위 앱(메신저 등)으로 새지 않게 전역 가로채기
         log("L4: 팝업 생성 완료")
@@ -232,6 +235,12 @@ class App:
             return
         self._auto_last_key = None
         self._last_trigger = 0.0
+
+    def _set_target_language(self, lang: str) -> None:
+        """팝업에서 목표 언어 변경 — 새 기본값으로 저장해 이후에도 유지한다."""
+        self.cfg["target_language"] = lang
+        save_config(self.cfg)
+        log(f"목표 언어 변경: {lang}")
 
     def _start_translation(self, popup: Popup, text: str, target_hwnd: int) -> None:
         cfg = self.cfg

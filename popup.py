@@ -1,12 +1,15 @@
 """마우스 커서 근처에 뜨는 번역 입력 팝업.
 
 Enter = 제출(번역 요청), Esc = 취소.
+하단의 언어 드롭다운으로 목표 언어를 바로 바꿀 수 있다.
 모든 메서드는 tkinter 메인 스레드에서 호출되어야 한다.
 """
 from __future__ import annotations
 
 import ctypes
+import os
 import tkinter as tk
+from ctypes import wintypes
 from typing import Callable
 
 from ui import font_family
@@ -59,10 +62,14 @@ def _round_rect_points(x1, y1, x2, y2, r):
 
 class Popup:
     def __init__(self, root: tk.Tk, on_submit: Callable[[str], None],
-                 on_close: Callable[[], None] | None = None) -> None:
+                 on_close: Callable[[], None] | None = None,
+                 languages: list[str] | None = None,
+                 language: str = "",
+                 on_language_change: Callable[[str], None] | None = None) -> None:
         self.root = root
         self.on_submit = on_submit
         self.on_close = on_close
+        self.on_language_change = on_language_change
         self._submitted = False
         self._closed = False
         self._ready = False  # 생성 직후 포커스 흔들림으로 자동 닫히는 것 방지
@@ -107,6 +114,22 @@ class Popup:
         bottom.pack(fill="x", pady=(3, 0))
         tk.Label(bottom, text="Enter 번역·삽입 · Esc 취소", bg=BG, fg=SUBTLE,
                  font=(fam, 6, "bold")).pack(side="right")
+        # 목표 언어 드롭다운 — 여기서 바꾸면 이번 번역부터 바로 적용된다.
+        self._lang_btn: tk.Menubutton | None = None
+        if languages:
+            self._lang_var = tk.StringVar(value=language)
+            mb = tk.Menubutton(bottom, text=f"{language} ▾", bg=BG, fg=ACCENT,
+                               font=(fam, 8), relief="flat", cursor="hand2",
+                               activebackground=BG, activeforeground=ACCENT,
+                               takefocus=0, padx=2, pady=0)
+            menu = tk.Menu(mb, tearoff=0, font=(fam, 9))
+            for lang in languages:
+                menu.add_radiobutton(label=lang, variable=self._lang_var,
+                                     value=lang,
+                                     command=lambda l=lang: self._set_language(l))
+            mb.configure(menu=menu)
+            mb.pack(side="left")
+            self._lang_btn = mb
         self.status = tk.Label(bottom, text="", bg=BG, fg=ACCENT,
                                font=(fam, 8), anchor="w")
         self.status.pack(side="left", fill="x", expand=True)
@@ -246,9 +269,32 @@ class Popup:
 
     def _on_focus_out(self, _event) -> None:
         # 생성 직후(_ready=False)나 번역 중에는 자동으로 닫지 않는다.
-        # 사용자가 의도적으로 다른 창을 클릭해 포커스를 잃었을 때만 취소.
+        # 언어 메뉴를 열 때도 FocusOut 이 발생하므로 즉시 닫지 않고,
+        # 잠시 뒤 전경 창이 '다른 프로세스'로 넘어갔을 때만 취소한다.
         if self._ready and not self._submitted:
-            self.close()
+            self.win.after(80, self._close_if_foreground_lost)
+
+    def _close_if_foreground_lost(self) -> None:
+        """전경 창이 우리 프로세스가 아니면(다른 앱 클릭) 팝업을 닫는다."""
+        if self._closed or self._submitted or not self.win.winfo_exists():
+            return
+        try:
+            fg = _user32.GetForegroundWindow()
+            pid = wintypes.DWORD()
+            _user32.GetWindowThreadProcessId(fg, ctypes.byref(pid))
+            if pid.value == os.getpid():
+                return  # 팝업/언어 메뉴 등 우리 창이 여전히 전경 → 유지
+        except Exception:
+            pass
+        self.close()
+
+    def _set_language(self, lang: str) -> None:
+        """언어 드롭다운 선택 — 표시 갱신 후 상위(App)에 알리고 입력란에 재포커스."""
+        if self._lang_btn is not None:
+            self._lang_btn.configure(text=f"{lang} ▾")
+        if self.on_language_change is not None:
+            self.on_language_change(lang)
+        self.text.focus_set()
 
     def _submit(self, _event=None) -> str:
         # "break" 를 돌려 Text 기본 동작(개행 삽입)을 막고 제출로만 처리한다.
