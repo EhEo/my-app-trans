@@ -155,6 +155,13 @@ class Popup:
         self.text.bind("<KP_Enter>", self._submit)
         self.text.bind("<Shift-Return>", self._on_shift_return)
         win.bind("<Escape>", lambda e: self.close())
+        # tk 기본 바인딩('all' 태그)은 단독 Alt keyup/F10 을 메뉴 활성화로 해석해
+        # 첫 Menubutton 메뉴를 자동으로 연다. inject.release_modifiers() 가 팝업 직전
+        # Alt keyup 을 주입하므로 언어 메뉴가 저절로 열린다 → toplevel 바인딩이
+        # 'all' 보다 먼저 실행되므로 "break" 로 차단한다.
+        win.bind("<F10>", lambda e: "break")
+        win.bind("<KeyRelease-Alt_L>", lambda e: "break")
+        win.bind("<KeyRelease-Alt_R>", lambda e: "break")
         win.bind("<FocusOut>", self._on_focus_out)
         # 입력 변화 시 줄 수에 맞춰 입력란 높이를 위로 키운다.
         self.text.bind("<KeyRelease>", self._auto_grow)
@@ -327,6 +334,12 @@ class Popup:
         if self._closed:
             return
         self._closed = True
+        # 언어 메뉴가 열린 상태에서 전역 Esc 후크로 닫으면 Toplevel 만 destroy 되고
+        # 네이티브 메뉴 창이 화면에 고아로 남는다 → 먼저 EndMenu() 로 닫는다.
+        try:
+            _user32.EndMenu()
+        except Exception:
+            pass
         if self.win.winfo_exists():
             self.win.destroy()
         if self.on_close is not None:
