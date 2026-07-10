@@ -1,10 +1,10 @@
-# 트레이에서 여는 설정 창 - 단축키는 좌/우 modifier 체크박스 + 1자 키 조합으로 편집
+# 트레이에서 여는 설정 창 - 단축키는 Ctrl/Shift/Alt 체크박스 + 1자 키 조합으로 편집
 """트레이에서 여는 설정 창.
 
 API 키 / 모델 / 목표 언어 / 단축키를 편집하고 저장한다.
-단축키는 좌/우 Ctrl·Shift·Alt 체크박스(멀티 선택) + 키 1자 입력으로 구성된다.
-저장 시 'left ctrl + right shift + z' 형태로 직렬화되어 keyboard 라이브러리에
-그대로 전달된다.
+단축키는 Ctrl·Shift·Alt 체크박스(멀티 선택) + 키 1자 입력으로 구성된다.
+저장 시 'ctrl + shift + z' 형태로 직렬화된다(RegisterHotKey 는 좌/우를 구분하지
+않으므로 통합 표기).
 메인 스레드에서만 생성/사용할 것.
 """
 from __future__ import annotations
@@ -20,37 +20,25 @@ from ui import font_family
 def _parse_hotkey(hk: str) -> tuple[dict, str]:
     """기존 hotkey 문자열을 (modifier dict, 키 문자열) 로 파싱한다.
 
-    'ctrl' 처럼 좌/우 미지정 토큰은 양쪽 모두 True 로 본다(이전 동작과 호환).
+    좌/우 표기(left ctrl 등)는 통합 플래그로 접어 읽는다 — RegisterHotKey 가
+    좌/우를 구분하지 않으므로 UI 도 통합 체크박스 하나로 표시한다.
     """
-    state = {
-        "left_ctrl": False, "right_ctrl": False,
-        "left_shift": False, "right_shift": False,
-        "left_alt": False, "right_alt": False,
-    }
+    state = {"ctrl": False, "shift": False, "alt": False}
     key = ""
     if not hk:
         return state, key
     parts = [p.strip() for p in hk.replace("+", " + ").split("+")]
     parts = [p.strip().lower() for p in parts if p.strip()]
     for p in parts:
-        if p in ("left ctrl", "lctrl", "leftctrl"):
-            state["left_ctrl"] = True
-        elif p in ("right ctrl", "rctrl", "rightctrl"):
-            state["right_ctrl"] = True
-        elif p == "ctrl":
-            state["left_ctrl"] = state["right_ctrl"] = True
-        elif p in ("left shift", "lshift", "leftshift"):
-            state["left_shift"] = True
-        elif p in ("right shift", "rshift", "rightshift"):
-            state["right_shift"] = True
-        elif p == "shift":
-            state["left_shift"] = state["right_shift"] = True
-        elif p in ("left alt", "lalt", "leftalt"):
-            state["left_alt"] = True
-        elif p in ("right alt", "ralt", "rightalt"):
-            state["right_alt"] = True
-        elif p == "alt":
-            state["left_alt"] = state["right_alt"] = True
+        if p in ("ctrl", "control", "left ctrl", "right ctrl",
+                 "lctrl", "rctrl", "leftctrl", "rightctrl"):
+            state["ctrl"] = True
+        elif p in ("shift", "left shift", "right shift",
+                   "lshift", "rshift", "leftshift", "rightshift"):
+            state["shift"] = True
+        elif p in ("alt", "left alt", "right alt",
+                   "lalt", "ralt", "leftalt", "rightalt"):
+            state["alt"] = True
         else:
             key = p  # 마지막 비-modifier 토큰을 키로 채택
     return state, key
@@ -104,27 +92,18 @@ class SettingsWindow:
         hk.grid(row=3, column=1, sticky="we", **pad)
 
         state, key = _parse_hotkey((cfg.get("hotkey") or "").lower())
-        self.lctrl_var = tk.BooleanVar(value=state["left_ctrl"])
-        self.rctrl_var = tk.BooleanVar(value=state["right_ctrl"])
-        self.lshift_var = tk.BooleanVar(value=state["left_shift"])
-        self.rshift_var = tk.BooleanVar(value=state["right_shift"])
-        self.lalt_var = tk.BooleanVar(value=state["left_alt"])
-        self.ralt_var = tk.BooleanVar(value=state["right_alt"])
+        self.ctrl_var = tk.BooleanVar(value=state["ctrl"])
+        self.shift_var = tk.BooleanVar(value=state["shift"])
+        self.alt_var = tk.BooleanVar(value=state["alt"])
 
-        def mod_row(text: str, lvar: tk.BooleanVar, rvar: tk.BooleanVar,
-                    r: int) -> None:
-            tk.Label(hk, text=text, font=LBL, bg="#ffffff",
-                     width=6, anchor="w").grid(row=r, column=0, sticky="w")
-            tk.Checkbutton(hk, text="왼쪽", variable=lvar, bg="#ffffff",
+        def mod_row(text: str, var: tk.BooleanVar, r: int) -> None:
+            tk.Checkbutton(hk, text=text, variable=var, bg="#ffffff",
                            activebackground="#ffffff", font=LBL).grid(
-                row=r, column=1, sticky="w")
-            tk.Checkbutton(hk, text="오른쪽", variable=rvar, bg="#ffffff",
-                           activebackground="#ffffff", font=LBL).grid(
-                row=r, column=2, sticky="w")
+                row=r, column=0, columnspan=2, sticky="w")
 
-        mod_row("Ctrl", self.lctrl_var, self.rctrl_var, 0)
-        mod_row("Shift", self.lshift_var, self.rshift_var, 1)
-        mod_row("Alt", self.lalt_var, self.ralt_var, 2)
+        mod_row("Ctrl", self.ctrl_var, 0)
+        mod_row("Shift", self.shift_var, 1)
+        mod_row("Alt", self.alt_var, 2)
 
         # 키 1자 입력
         tk.Label(hk, text="키", font=LBL, bg="#ffffff",
@@ -148,8 +127,7 @@ class SettingsWindow:
                                     font=HINT)
         self.hk_preview.grid(row=4, column=0, columnspan=3, sticky="w",
                               pady=(4, 0))
-        for v in (self.lctrl_var, self.rctrl_var, self.lshift_var,
-                  self.rshift_var, self.lalt_var, self.ralt_var):
+        for v in (self.ctrl_var, self.shift_var, self.alt_var):
             v.trace_add("write", lambda *_: self._update_preview())
         self.key_char_var.trace_add("write", lambda *_: self._update_preview())
         self._update_preview()
@@ -177,20 +155,14 @@ class SettingsWindow:
         win.focus_force()
 
     def _build_hotkey(self) -> str:
-        """체크박스 + 키 문자를 'left ctrl + right shift + z' 형태로 직렬화."""
+        """체크박스 + 키 문자를 'ctrl + shift + z' 형태로 직렬화."""
         parts = []
-        if self.lctrl_var.get():
-            parts.append("left ctrl")
-        if self.rctrl_var.get():
-            parts.append("right ctrl")
-        if self.lshift_var.get():
-            parts.append("left shift")
-        if self.rshift_var.get():
-            parts.append("right shift")
-        if self.lalt_var.get():
-            parts.append("left alt")
-        if self.ralt_var.get():
-            parts.append("right alt")
+        if self.ctrl_var.get():
+            parts.append("ctrl")
+        if self.shift_var.get():
+            parts.append("shift")
+        if self.alt_var.get():
+            parts.append("alt")
         key = (self.key_char_var.get() or "").strip().lower()
         if key:
             parts.append(key)

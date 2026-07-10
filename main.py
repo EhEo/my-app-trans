@@ -4,7 +4,7 @@
 
 스레드 모델:
 - tkinter는 메인 스레드에서 mainloop 실행 (숨겨진 root).
-- 전역 단축키(keyboard 스레드), 트레이(pystray 스레드), 번역/주입(워커 스레드)에서
+- 전역 단축키(hotkey 스레드), 트레이(pystray 스레드), 번역/주입(워커 스레드)에서
   발생하는 모든 UI 작업은 thread-safe 큐에 콜백으로 넣고, 메인 스레드의 pump 루프가
   실행한다. (tkinter는 스레드 안전하지 않으므로 단일 창구로 일원화)
 """
@@ -19,13 +19,13 @@ import time
 import tkinter as tk
 from ctypes import wintypes
 
-import keyboard
 import mouse
 import pystray
 import uiautomation as auto
 from PIL import Image, ImageDraw, ImageFont
 
 from config import LANGUAGES, load_config, save_config
+from hotkey import HotkeyManager, parse_hotkey
 from inject import paste_into, release_modifiers
 from popup import Popup
 from settings_window import SettingsWindow
@@ -112,8 +112,11 @@ class App:
 
         self._popup: Popup | None = None
         self._settings: SettingsWindow | None = None
-        self._hotkey_handle = None
-        self._esc_handle = None  # 팝업 열림 동안의 전역 Esc 핸들
+        # RegisterHotKey 엔진: id=1 은 번역 단축키, id=2 는 팝업 Esc(열림 동안만 등록).
+        self._hotkeys = HotkeyManager()
+        self._hotkeys.set_callback(1, self._on_hotkey)
+        self._hotkeys.set_callback(2, lambda: self.post(self._cancel_popup))
+        self._hotkeys.start()
         self.icon: pystray.Icon | None = None
 
         # 자동 감지 모드 상태
@@ -146,12 +149,13 @@ class App:
 
     # --- 팝업 / 번역 / 주입 ---
     def _on_hotkey(self) -> None:
-        """전역 단축키 콜백 (keyboard 스레드에서 실행).
+        """전역 단축키 콜백 (HotkeyManager 스레드에서 실행).
 
         재진입 가드: 키 자동반복이나 이미 떠 있는 팝업 상황에서 콜백이
         중복 큐잉되어 두 번째 콜이 첫 팝업을 target 으로 잡는 버그를 막는다.
-        modifier 가 떼지기를 짧게 기다린 뒤 (auto-repeat 으로 다시 down 되는 것 방지)
-        메인 스레드로 한 번만 show_popup 을 예약한다.
+        modifier 해제 대기 루프는 이제 hotkey 전용 스레드에서 돌므로 시스템 입력을
+        블로킹하지 않는다. modifier 가 떼지기를 짧게 기다린 뒤 (auto-repeat 으로 다시
+        down 되는 것 방지) 메인 스레드로 한 번만 show_popup 을 예약한다.
         """
         if self._hotkey_inflight or self._popup_active:
             log("L1: 단축키 무시 (이미 in-flight 또는 팝업 활성)")
@@ -172,46 +176,43 @@ class App:
         # 팝업을 띄우기 직전의 전경 창 = 글을 넣을 대상
         target_hwnd = user32.GetForegroundWindow()
         log(f"L3/L4: show_popup 실행 (대상 hwnd={target_hwnd})")
-        # 단축키의 Ctrl/Alt 가 OS 상태에 남아 있으면 팝업 입력란에서
-        # 한글 첫 글자가 단축키로 가로채여 입력이 안 된다. 먼저 강제 해제.
-        release_modifiers()
-        if self._popup is not None and self._popup.win.winfo_exists():
-            self._popup.close()
-        # 자동/단축키 어느 경로든: 현재 필드를 '처리됨'으로 기록 → 붙여넣기 후 재팝업 방지
-        self._popup_active = True
-        self._auto_last_key = self._current_field_key
-        self._last_trigger = time.time()
-        self._popup = Popup(
-            self.root,
-            on_submit=lambda text: self._start_translation(self._popup, text, target_hwnd),
-            on_close=self._on_popup_closed,
-            languages=list(LANGUAGES.keys()),
-            language=self.cfg.get("target_language", "영어"),
-            on_language_change=self._set_target_language,
-        )
-        self._register_esc()  # Esc가 하위 앱(메신저 등)으로 새지 않게 전역 가로채기
-        log("L4: 팝업 생성 완료")
+        try:
+            # 단축키의 Ctrl/Alt 가 OS 상태에 남아 있으면 팝업 입력란에서
+            # 한글 첫 글자가 단축키로 가로채여 입력이 안 된다. 먼저 강제 해제.
+            release_modifiers()
+            if self._popup is not None and self._popup.win.winfo_exists():
+                self._popup.close()
+            # 자동/단축키 어느 경로든: 현재 필드를 '처리됨'으로 기록 → 붙여넣기 후 재팝업 방지
+            self._popup_active = True
+            self._auto_last_key = self._current_field_key
+            self._last_trigger = time.time()
+            self._popup = Popup(
+                self.root,
+                on_submit=lambda text: self._start_translation(self._popup, text, target_hwnd),
+                on_close=self._on_popup_closed,
+                languages=list(LANGUAGES.keys()),
+                language=self.cfg.get("target_language", "영어"),
+                on_language_change=self._set_target_language,
+            )
+            self._register_esc()  # Esc가 하위 앱(메신저 등)으로 새지 않게 전역 가로채기
+            log("L4: 팝업 생성 완료")
+        except Exception:
+            # 예외 시 플래그가 영구 래치되면 이후 단축키가 영영 무반응 → 복구 후 재-raise.
+            self._popup_active = False
+            self._hotkey_inflight = False
+            raise
 
     def _register_esc(self) -> None:
-        """팝업이 열린 동안 Esc를 전역에서 가로채(suppress) 팝업만 닫는다.
+        """팝업이 열린 동안 Esc를 전역에서 가로채 팝업만 닫는다.
 
         팝업이 키보드 포커스를 못 가졌거나 하위 앱이 Esc를 선점하는 경우에도
-        Esc가 그 앱(메신저 등)으로 전달돼 창이 닫히는 문제를 막는다.
+        Esc가 그 앱(메신저 등)으로 전달돼 창이 닫히는 문제를 막는다. RegisterHotKey
+        는 등록된 동안 시스템 전체 Esc 를 소비하므로 기존 suppress=True 와 동일하다.
         """
-        self._unregister_esc()
-        try:
-            self._esc_handle = keyboard.add_hotkey(
-                "esc", lambda: self.post(self._cancel_popup), suppress=True)
-        except Exception as e:
-            log(f"esc 후크 등록 실패: {e}")
+        self._hotkeys.register(2, 0, 0x1B)  # 0x1B = VK_ESCAPE
 
     def _unregister_esc(self) -> None:
-        if self._esc_handle is not None:
-            try:
-                keyboard.remove_hotkey(self._esc_handle)
-            except (KeyError, ValueError):
-                pass
-            self._esc_handle = None
+        self._hotkeys.unregister(2)
 
     def _cancel_popup(self) -> None:
         if self._popup is not None and self._popup.win.winfo_exists():
@@ -474,27 +475,27 @@ class App:
 
     # --- 전역 단축키 ---
     def _register_hotkey(self) -> bool:
-        """현재 설정의 단축키를 등록한다. 성공 여부를 반환."""
-        if self._hotkey_handle is not None:
-            try:
-                keyboard.remove_hotkey(self._hotkey_handle)
-            except (KeyError, ValueError):
-                pass
-            self._hotkey_handle = None
+        """현재 설정의 단축키를 등록한다. 성공 여부를 반환.
+
+        파싱 실패(형식 오류)나 등록 실패(다른 앱 점유 = error 1409) 시 False 를
+        돌려주면 apply_settings 가 이전 단축키로 자동 복구한다.
+        """
+        self._hotkeys.unregister(1)  # 재등록 전 기존 id=1 해제
         hk = self.cfg.get("hotkey") or "ctrl+alt+space"
-        try:
-            # suppress=True: hotkey 구성 키들을 OS 로 전달하지 않는다.
-            # 이렇게 하면 OS 는 사용자가 Ctrl+Alt+Z 를 누른 적이 없는 상태가 되어,
-            # 다음에 오는 한글 키가 단축키로 해석되지 않고 일반 입력으로 들어간다.
-            self._hotkey_handle = keyboard.add_hotkey(
-                hk, self._on_hotkey, suppress=True)
-            log(f"단축키 '{hk}' 등록 성공 (suppress=True)")
-            return True
-        except Exception as e:
-            print(f"[hotkey] '{hk}' 등록 실패: {e}")
+        parsed = parse_hotkey(hk)
+        if parsed is None:
+            print(f"[hotkey] '{hk}' 파싱 실패 (형식 오류)")
             if self.icon is not None:
-                self.icon.notify(f"단축키 '{hk}' 등록 실패", "번역 입력기")
+                self.icon.notify(f"단축키 '{hk}' 형식 오류", "번역 입력기")
             return False
+        mods, vk = parsed
+        if self._hotkeys.register(1, mods, vk):
+            log(f"단축키 '{hk}' 등록 성공")
+            return True
+        print(f"[hotkey] '{hk}' 등록 실패 (충돌 — 다른 앱이 점유 중일 수 있음)")
+        if self.icon is not None:
+            self.icon.notify(f"단축키 '{hk}' 등록 실패", "번역 입력기")
+        return False
 
     # --- 트레이 ---
     @staticmethod
@@ -545,10 +546,7 @@ class App:
     # --- 종료 ---
     def quit(self) -> None:
         self._auto_running = False
-        try:
-            keyboard.unhook_all()
-        except Exception:
-            pass
+        self._hotkeys.stop()
         try:
             mouse.unhook_all()
         except Exception:
