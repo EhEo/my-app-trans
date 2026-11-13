@@ -1,0 +1,7 @@
+{
+  "tool_name": "Bash",
+  "tool_input_preview": "{\"command\":\"git commit -q -m \\\"체크리스트: exe 재빌드·키 포함 설치 파일 검증 완료\\\" -- checklist.md && git log --oneline -1\",\"description\":\"체크리스트 커밋\"}",
+  "error": "Exit code 1\nOn branch master\nYour branch is ahead of 'origin/master' by 15 commits.\n  (use \"git push\" to publish your local commits)\n\nUntracked files:\n  (use \"git add <file>...\" to include in what will be committed)\n\t.claude/\n\t.omc/\n\tAGENT.md\n\nnothing added to commit but untracked files present (use \"git add\" to track)",
+  "timestamp": "2026-11-13T06:19:44.091Z",
+  "retry_count": 1
+}

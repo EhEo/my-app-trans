@@ -1,0 +1,402 @@
+{
+  "version": "1.0.0",
+  "lastScanned": 1794532208649,
+  "projectRoot": "D:\\GitRepos\\my-app-trans",
+  "techStack": {
+    "languages": [
+      {
+        "name": "Python",
+        "version": null,
+        "confidence": "high",
+        "markers": [
+          "requirements.txt"
+        ]
+      }
+    ],
+    "frameworks": [],
+    "packageManager": "pip",
+    "runtime": null
+  },
+  "build": {
+    "buildCommand": null,
+    "testCommand": null,
+    "lintCommand": null,
+    "devCommand": null,
+    "scripts": {}
+  },
+  "conventions": {
+    "namingStyle": null,
+    "importStyle": null,
+    "testPattern": null,
+    "fileOrganization": null
+  },
+  "structure": {
+    "isMonorepo": false,
+    "workspaces": [],
+    "mainDirectories": [
+      "docs",
+      "tests"
+    ],
+    "gitBranches": {
+      "defaultBranch": "master",
+      "branchingStrategy": null
+    }
+  },
+  "customNotes": [],
+  "directoryMap": {
+    "build": {
+      "path": "build",
+      "purpose": "Build output",
+      "fileCount": 0,
+      "lastAccessed": 1794532208630,
+      "keyFiles": []
+    },
+    "dist": {
+      "path": "dist",
+      "purpose": "Distribution/build output",
+      "fileCount": 3,
+      "lastAccessed": 1794532208630,
+      "keyFiles": [
+        "번역입력기 - 바로 가기.lnk",
+        "번역입력기.exe",
+        "번역입력기_설치.exe"
+      ]
+    },
+    "docs": {
+      "path": "docs",
+      "purpose": "Documentation",
+      "fileCount": 0,
+      "lastAccessed": 1794532208631,
+      "keyFiles": []
+    },
+    "tests": {
+      "path": "tests",
+      "purpose": "Test files",
+      "fileCount": 5,
+      "lastAccessed": 1794532208631,
+      "keyFiles": [
+        "test_autodetect.py",
+        "test_config.py",
+        "test_hotkey_parse.py",
+        "test_settings_parse.py",
+        "test_translator.py"
+      ]
+    },
+    "__pycache__": {
+      "path": "__pycache__",
+      "purpose": null,
+      "fileCount": 9,
+      "lastAccessed": 1794532208632,
+      "keyFiles": [
+        "config.cpython-314.pyc",
+        "hotkey.cpython-314.pyc",
+        "inject.cpython-314.pyc",
+        "installer.cpython-314.pyc",
+        "main.cpython-314.pyc"
+      ]
+    }
+  },
+  "hotPaths": [
+    {
+      "path": "main.py",
+      "accessCount": 22,
+      "lastAccessed": 1794546883534,
+      "type": "file"
+    },
+    {
+      "path": "popup.py",
+      "accessCount": 20,
+      "lastAccessed": 1794546216846,
+      "type": "file"
+    },
+    {
+      "path": "settings_window.py",
+      "accessCount": 11,
+      "lastAccessed": 1794546610877,
+      "type": "file"
+    },
+    {
+      "path": "translator.py",
+      "accessCount": 11,
+      "lastAccessed": 1794546871742,
+      "type": "file"
+    },
+    {
+      "path": "tests\\test_translator.py",
+      "accessCount": 6,
+      "lastAccessed": 1794546845027,
+      "type": "file"
+    },
+    {
+      "path": "checklist.md",
+      "accessCount": 5,
+      "lastAccessed": 1794550802964,
+      "type": "file"
+    },
+    {
+      "path": "context-notes.md",
+      "accessCount": 4,
+      "lastAccessed": 1794547530326,
+      "type": "file"
+    },
+    {
+      "path": "tests\\test_settings_parse.py",
+      "accessCount": 3,
+      "lastAccessed": 1783653590899,
+      "type": "file"
+    },
+    {
+      "path": "inject.py",
+      "accessCount": 3,
+      "lastAccessed": 1794545902488,
+      "type": "directory"
+    },
+    {
+      "path": "installer.spec",
+      "accessCount": 3,
+      "lastAccessed": 1794550613910,
+      "type": "file"
+    },
+    {
+      "path": "C:\\Users\\MISTOP\\.claude\\projects\\d--GitRepos-my-app-trans\\memory\\MEMORY.md",
+      "accessCount": 2,
+      "lastAccessed": 1783645635261,
+      "type": "file"
+    },
+    {
+      "path": "diag_register_hotkey.py",
+      "accessCount": 2,
+      "lastAccessed": 1783653313054,
+      "type": "file"
+    },
+    {
+      "path": "config.py",
+      "accessCount": 2,
+      "lastAccessed": 1783653319413,
+      "type": "file"
+    },
+    {
+      "path": "tests\\test_hotkey_parse.py",
+      "accessCount": 2,
+      "lastAccessed": 1783653611346,
+      "type": "file"
+    },
+    {
+      "path": "hotkey.py",
+      "accessCount": 2,
+      "lastAccessed": 1783653731098,
+      "type": "file"
+    },
+    {
+      "path": "C:\\Users\\MISTOP\\.claude\\projects\\d--GitRepos-my-app-trans\\memory\\hotkey-phantom-key-death.md",
+      "accessCount": 2,
+      "lastAccessed": 1783654270069,
+      "type": "file"
+    },
+    {
+      "path": "ui.py",
+      "accessCount": 2,
+      "lastAccessed": 1794546147795,
+      "type": "file"
+    },
+    {
+      "path": "C:\\Users\\MISTOP\\AppData\\Local\\Temp\\claude\\d--GitRepos-my-app-trans\\ff657cd7-cc8b-492d-a9fb-a0ba8fcdb1d6\\scratchpad\\smoke_popup_lang.py",
+      "accessCount": 1,
+      "lastAccessed": 1783416530187,
+      "type": "file"
+    },
+    {
+      "path": "C:\\Users\\MISTOP\\AppData\\Local\\Temp\\claude\\d--GitRepos-my-app-trans\\ff657cd7-cc8b-492d-a9fb-a0ba8fcdb1d6\\scratchpad\\drive_popup.py",
+      "accessCount": 1,
+      "lastAccessed": 1783416832139,
+      "type": "file"
+    },
+    {
+      "path": "C:\\Users\\MISTOP\\AppData\\Local\\Temp\\claude\\d--GitRepos-my-app-trans\\ff657cd7-cc8b-492d-a9fb-a0ba8fcdb1d6\\scratchpad\\1_popup_open.png",
+      "accessCount": 1,
+      "lastAccessed": 1783416855563,
+      "type": "file"
+    },
+    {
+      "path": "C:\\Users\\MISTOP\\AppData\\Local\\Temp\\claude\\d--GitRepos-my-app-trans\\ff657cd7-cc8b-492d-a9fb-a0ba8fcdb1d6\\scratchpad\\2_menu_open.png",
+      "accessCount": 1,
+      "lastAccessed": 1783416856498,
+      "type": "file"
+    },
+    {
+      "path": "C:\\Users\\MISTOP\\AppData\\Local\\Temp\\claude\\d--GitRepos-my-app-trans\\ff657cd7-cc8b-492d-a9fb-a0ba8fcdb1d6\\scratchpad\\3_after_select.png",
+      "accessCount": 1,
+      "lastAccessed": 1783416857442,
+      "type": "file"
+    },
+    {
+      "path": "AGENT.md",
+      "accessCount": 1,
+      "lastAccessed": 1783417022464,
+      "type": "file"
+    },
+    {
+      "path": "C:\\Users\\MISTOP\\.claude\\projects\\d--GitRepos-my-app-trans\\memory\\antivirus-bearfoos-false-positive.md",
+      "accessCount": 1,
+      "lastAccessed": 1783417040594,
+      "type": "file"
+    },
+    {
+      "path": "C:\\Users\\MISTOP\\AppData\\Local\\Temp\\claude\\d--GitRepos-my-app-trans\\ff657cd7-cc8b-492d-a9fb-a0ba8fcdb1d6\\scratchpad\\4_built_exe_popup.png",
+      "accessCount": 1,
+      "lastAccessed": 1783417328591,
+      "type": "file"
+    },
+    {
+      "path": "C:\\Users\\MISTOP\\AppData\\Local\\Temp\\claude\\d--GitRepos-my-app-trans\\ff657cd7-cc8b-492d-a9fb-a0ba8fcdb1d6\\scratchpad\\repro_altup.py",
+      "accessCount": 1,
+      "lastAccessed": 1783417498000,
+      "type": "file"
+    },
+    {
+      "path": "C:\\Users\\MISTOP\\AppData\\Local\\Temp\\claude\\d--GitRepos-my-app-trans\\ff657cd7-cc8b-492d-a9fb-a0ba8fcdb1d6\\scratchpad\\verify_fix.py",
+      "accessCount": 1,
+      "lastAccessed": 1783417771470,
+      "type": "file"
+    },
+    {
+      "path": "C:\\Users\\MISTOP\\AppData\\Local\\Temp\\claude\\d--GitRepos-my-app-trans\\ff657cd7-cc8b-492d-a9fb-a0ba8fcdb1d6\\scratchpad\\7_fix_menu_click.png",
+      "accessCount": 1,
+      "lastAccessed": 1783417805137,
+      "type": "file"
+    },
+    {
+      "path": "C:\\Users\\MISTOP\\.claude\\projects\\d--GitRepos-my-app-trans\\memory\\hotkey-suppress-modifier-conflict.md",
+      "accessCount": 1,
+      "lastAccessed": 1783644481061,
+      "type": "file"
+    },
+    {
+      "path": "C:\\Users\\MISTOP\\AppData\\Roaming\\Python\\Python314\\site-packages\\keyboard\\_generic.py",
+      "accessCount": 1,
+      "lastAccessed": 1783644674637,
+      "type": "directory"
+    },
+    {
+      "path": "C:\\Users\\MISTOP\\AppData\\Roaming\\Python\\Python314\\site-packages\\keyboard",
+      "accessCount": 1,
+      "lastAccessed": 1783644789994,
+      "type": "directory"
+    },
+    {
+      "path": "C:\\Users\\MISTOP\\AppData\\Local\\Temp\\claude\\d--GitRepos-my-app-trans\\ff657cd7-cc8b-492d-a9fb-a0ba8fcdb1d6\\scratchpad\\repro_hook_death.py",
+      "accessCount": 1,
+      "lastAccessed": 1783644922850,
+      "type": "file"
+    },
+    {
+      "path": "C:\\Users\\MISTOP\\AppData\\Local\\Temp\\claude\\d--GitRepos-my-app-trans\\ff657cd7-cc8b-492d-a9fb-a0ba8fcdb1d6\\scratchpad\\probe_hang.py",
+      "accessCount": 1,
+      "lastAccessed": 1783645004215,
+      "type": "file"
+    },
+    {
+      "path": "C:\\Users\\MISTOP\\AppData\\Roaming\\Python\\Python314\\site-packages\\keyboard\\__init__.py",
+      "accessCount": 1,
+      "lastAccessed": 1783645119084,
+      "type": "file"
+    },
+    {
+      "path": "C:\\Users\\MISTOP\\AppData\\Local\\Temp\\claude\\d--GitRepos-my-app-trans\\ff657cd7-cc8b-492d-a9fb-a0ba8fcdb1d6\\scratchpad\\probe_leak.py",
+      "accessCount": 1,
+      "lastAccessed": 1783645215889,
+      "type": "file"
+    },
+    {
+      "path": "C:\\Users\\MISTOP\\AppData\\Local\\Temp\\claude\\d--GitRepos-my-app-trans\\ff657cd7-cc8b-492d-a9fb-a0ba8fcdb1d6\\scratchpad\\repro_phantom.py",
+      "accessCount": 1,
+      "lastAccessed": 1783645318454,
+      "type": "file"
+    },
+    {
+      "path": "C:\\Users\\MISTOP\\AppData\\Local\\Temp\\claude\\d--GitRepos-my-app-trans\\ff657cd7-cc8b-492d-a9fb-a0ba8fcdb1d6\\scratchpad\\probe_after.py",
+      "accessCount": 1,
+      "lastAccessed": 1783645507833,
+      "type": "file"
+    },
+    {
+      "path": "C:\\Users\\MISTOP\\AppData\\Local\\Temp\\claude\\d--GitRepos-my-app-trans\\ff657cd7-cc8b-492d-a9fb-a0ba8fcdb1d6\\tasks\\biuqzq1wo.output",
+      "accessCount": 1,
+      "lastAccessed": 1783650263481,
+      "type": "file"
+    },
+    {
+      "path": "C:\\Users\\MISTOP\\AppData\\Local\\Temp\\claude\\d--GitRepos-my-app-trans\\ff657cd7-cc8b-492d-a9fb-a0ba8fcdb1d6\\tasks\\bos6uycar.output",
+      "accessCount": 1,
+      "lastAccessed": 1783652637875,
+      "type": "file"
+    },
+    {
+      "path": "C:\\Users\\MISTOP\\AppData\\Local\\Temp\\claude\\d--GitRepos-my-app-trans\\ff657cd7-cc8b-492d-a9fb-a0ba8fcdb1d6\\scratchpad\\verify_registerhotkey.py",
+      "accessCount": 1,
+      "lastAccessed": 1783653813600,
+      "type": "file"
+    },
+    {
+      "path": "C:\\Users\\MISTOP\\AppData\\Local\\Temp\\claude\\d--GitRepos-my-app-trans\\ff657cd7-cc8b-492d-a9fb-a0ba8fcdb1d6\\scratchpad\\verify_esc_release.py",
+      "accessCount": 1,
+      "lastAccessed": 1783653937288,
+      "type": "file"
+    },
+    {
+      "path": "C:\\Users\\MISTOP\\AppData\\Local\\Temp\\claude\\d--GitRepos-my-app-trans\\ff657cd7-cc8b-492d-a9fb-a0ba8fcdb1d6\\scratchpad\\final_check.py",
+      "accessCount": 1,
+      "lastAccessed": 1783654222811,
+      "type": "file"
+    },
+    {
+      "path": "C:\\Users\\MISTOP\\AppData\\Local\\Temp\\claude\\d--GitRepos-my-app-trans\\ff657cd7-cc8b-492d-a9fb-a0ba8fcdb1d6\\scratchpad\\ab_measure.py",
+      "accessCount": 1,
+      "lastAccessed": 1783669761827,
+      "type": "file"
+    },
+    {
+      "path": "C:\\Users\\MISTOP\\AppData\\Local\\Temp\\claude\\a02646f74934a2e0\\2da124f6-8a6e-4c3a-9bee-9139e1e14c0f\\scratchpad\\bench_translate.py",
+      "accessCount": 1,
+      "lastAccessed": 1794533177350,
+      "type": "file"
+    },
+    {
+      "path": "C:\\Users\\MISTOP\\AppData\\Local\\Temp\\claude\\a02646f74934a2e0\\2da124f6-8a6e-4c3a-9bee-9139e1e14c0f\\scratchpad\\bench_models.py",
+      "accessCount": 1,
+      "lastAccessed": 1794533241351,
+      "type": "file"
+    },
+    {
+      "path": "C:\\Users\\MISTOP\\AppData\\Local\\Temp\\claude\\a02646f74934a2e0\\2da124f6-8a6e-4c3a-9bee-9139e1e14c0f\\scratchpad\\verify_prewarm.py",
+      "accessCount": 1,
+      "lastAccessed": 1794537938299,
+      "type": "file"
+    },
+    {
+      "path": "C:\\Users\\MISTOP\\AppData\\Local\\Temp\\claude\\a02646f74934a2e0\\2da124f6-8a6e-4c3a-9bee-9139e1e14c0f\\scratchpad\\verify_idle.py",
+      "accessCount": 1,
+      "lastAccessed": 1794537968512,
+      "type": "file"
+    },
+    {
+      "path": "C:\\Users\\MISTOP\\AppData\\Local\\Temp\\claude\\a02646f74934a2e0\\2da124f6-8a6e-4c3a-9bee-9139e1e14c0f\\scratchpad\\verify_warmreq.py",
+      "accessCount": 1,
+      "lastAccessed": 1794545880805,
+      "type": "file"
+    },
+    {
+      "path": "C:\\Users\\MISTOP\\AppData\\Local\\Temp\\claude\\a02646f74934a2e0\\2da124f6-8a6e-4c3a-9bee-9139e1e14c0f\\scratchpad\\shot_ui.py",
+      "accessCount": 1,
+      "lastAccessed": 1794545974238,
+      "type": "file"
+    },
+    {
+      "path": "C:\\Users\\MISTOP\\AppData\\Local\\Temp\\claude\\a02646f74934a2e0\\2da124f6-8a6e-4c3a-9bee-9139e1e14c0f\\scratchpad\\popup_text.png",
+      "accessCount": 1,
+      "lastAccessed": 1794545983374,
+      "type": "file"
+    }
+  ],
+  "userDirectives": []
+}

@@ -1,0 +1,7 @@
+{
+  "tool_name": "PowerShell",
+  "tool_input_preview": "{\"command\":\"Get-CimInstance Win32_Process | Where-Object { $_.Name -match 'python' -and $_.CommandLine -match 'main\\\\.py' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -Confirm:$false }; g...",
+  "error": "Exit code 1\nerror: pathspec 'hotkey.py' did not match any file(s) known to git\nerror: pathspec 'tests/test_hotkey_parse.py' did not match any file(s) known to git",
+  "timestamp": "2026-07-10T03:26:33.888Z",
+  "retry_count": 1
+}

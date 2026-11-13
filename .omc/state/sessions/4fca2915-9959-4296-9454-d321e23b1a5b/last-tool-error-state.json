@@ -1,0 +1,7 @@
+{
+  "tool_name": "Read",
+  "tool_input_preview": "{\"file_path\":\"C:\\\\Users\\\\MISTOP\\\\.claude\\\\projects\\\\d--GitRepos-my-app-trans\\\\memory\\\\MEMORY.md\"}",
+  "error": "File does not exist. Note: your current working directory is D:\\GitRepos\\my-app-trans.",
+  "timestamp": "2026-06-11T09:54:48.301Z",
+  "retry_count": 1
+}

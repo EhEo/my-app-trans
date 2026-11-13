@@ -1,0 +1,23 @@
+{
+  "permissions": {
+    "allow": [
+      "PowerShell(python --version)",
+      "PowerShell(python -c \"import sys; print\\(sys.executable\\)\")",
+      "PowerShell(python -m pip install --user -r d:\\\\GitRepos\\\\my-app-trans\\\\requirements.txt 2>&1)",
+      "PowerShell(python -m unittest discover -s d:\\\\GitRepos\\\\my-app-trans\\\\tests -v 2>&1)",
+      "PowerShell($log = \"$env:TEMP\\\\diag_reghotkey.log\"; Remove-Item $log -ErrorAction SilentlyContinue; New-Item -ItemType File -Path $log | Out-Null; Start-Process powershell -ArgumentList '-NoExit', '-Command', \"Set-Location 'd:\\\\GitRepos\\\\my-app-trans'; python diag_register_hotkey.py 2>&1 | Tee-Object -FilePath '$log'\"; \"log: $log\"; \"새 콘솔창이 떴습니다 — 30초 안에 메모장에서 Ctrl+Shift+Z를 2-3번 눌러주세요.\")",
+      "Bash(powershell.exe -Command 'Get-Content $env:TEMP\\\\diag_reghotkey.log -Raw -Encoding UTF8')",
+      "PowerShell($log = \"$env:TEMP\\\\diag_reghotkey.log\"; Remove-Item $log -ErrorAction SilentlyContinue; New-Item -ItemType File -Path $log | Out-Null; Start-Process powershell -ArgumentList '-NoExit', '-Command', \"Set-Location 'd:\\\\GitRepos\\\\my-app-trans'; python -u diag_register_hotkey.py 2>&1 | Tee-Object -FilePath '$log'\"; \"log: $log\"; \"콘솔창에 '등록 성공. 30초간 감지합니다...' 메시지가 보이면 그때 메모장에서 Ctrl+Shift+Z를 누르세요.\")",
+      "PowerShell($log = \"$env:TEMP\\\\diag_reghotkey.log\"; Remove-Item $log -ErrorAction SilentlyContinue; New-Item -ItemType File -Path $log | Out-Null; Start-Process powershell -ArgumentList '-NoExit', '-Command', \"Set-Location 'd:\\\\GitRepos\\\\my-app-trans'; `$env:DIAG_KEY='F8'; python -u diag_register_hotkey.py 2>&1 | Tee-Object -FilePath '$log'\"; \"log: $log\"; \"이번엔 단축키가 F8 입니다 — 메모장에서 F8 키를 2-3번 눌러주세요. 30초 시간 있어요.\")",
+      "PowerShell($log = \"$env:TEMP\\\\diag_reghotkey.log\"; Remove-Item $log -ErrorAction SilentlyContinue; New-Item -ItemType File -Path $log | Out-Null; Start-Process powershell -ArgumentList '-NoExit', '-Command', \"Set-Location 'd:\\\\GitRepos\\\\my-app-trans'; `$env:PYTHONIOENCODING='utf-8'; `$env:DIAG_KEY='F8'; python -u diag_register_hotkey.py 2>&1 | Tee-Object -FilePath '$log'\"; \"log: $log\"; \"메모장에서 F8을 2-3번 눌러주세요. 30초 시간 있어요.\")",
+      "PowerShell($cfg = \"$env:APPDATA\\\\my-app-trans\\\\config.json\"; $j = Get-Content $cfg -Raw | ConvertFrom-Json; $old = $j.hotkey; $j.hotkey = 'ctrl+alt+z'; \\($j | ConvertTo-Json\\) | Set-Content -Path $cfg -Encoding UTF8; \"hotkey: $old -> $\\($j.hotkey\\)\"; \"---\"; Get-Content $cfg -Raw)",
+      "PowerShell(python -m unittest discover -s d:\\\\GitRepos\\\\my-app-trans\\\\tests 2>&1)",
+      "PowerShell($exe = \"$env:LOCALAPPDATA\\\\Programs\\\\번역입력기\\\\번역입력기.exe\"; $dist = \"d:\\\\GitRepos\\\\my-app-trans\\\\dist\\\\번역입력기.exe\"; \"installed: $\\(\\(Get-Item $exe\\).LastWriteTime\\) size=$\\(\\(Get-Item $exe\\).Length\\)\"; \"dist:      $\\(\\(Get-Item $dist\\).LastWriteTime\\) size=$\\(\\(Get-Item $dist\\).Length\\)\"; \"main.py:   $\\(\\(Get-Item d:\\\\GitRepos\\\\my-app-trans\\\\main.py\\).LastWriteTime\\)\"; \"inject.py: $\\(\\(Get-Item d:\\\\GitRepos\\\\my-app-trans\\\\inject.py\\).LastWriteTime\\)\")",
+      "Read(//c/Users/MISTOP/AppData/Roaming/my-app-trans/**)",
+      "PowerShell(python -c \"import keyboard; print\\('keyboard', keyboard.version\\); import keyboard as k, os; print\\(os.path.dirname\\(k.__file__\\)\\)\")",
+      "Bash(node C:/Users/MISTOP/.claude/plugins/cache/openai-codex/codex/1.0.4/scripts/codex-companion.mjs adversarial-review 'claude 에서는 결론 *)",
+      "PowerShell(Get-Process 번역입력기 -ErrorAction SilentlyContinue | Select-Object Id, StartTime, CPU, @{n='Threads';e={$_.Threads.Count}}; Get-Item \"$env:LOCALAPPDATA\\\\Programs\\\\번역입력기\\\\번역입력기.exe\" | Select-Object Length, LastWriteTime; Get-Content \"$env:APPDATA\\\\my-app-trans\\\\config.json\" | Select-String 'auto_mode|hotkey')",
+      "PowerShell(\\(Get-Item \"$env:LOCALAPPDATA\\\\Programs\\\\번역입력기\\\\번역입력기.exe\"\\).Length; \\(Get-Item \"$env:LOCALAPPDATA\\\\Programs\\\\번역입력기\\\\번역입력기.exe\"\\).LastWriteTime; Get-Content \"$env:APPDATA\\\\my-app-trans\\\\config.json\" -Raw; Get-Date)"
+    ]
+  }
+}
