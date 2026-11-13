@@ -12,10 +12,13 @@
 from __future__ import annotations
 
 import ctypes
+import json
 import os
 import shutil
 import sys
 from pathlib import Path
+
+from config import config_path, load_config, save_config
 
 APP_EXE = "번역입력기.exe"
 SHORTCUT_NAME = "번역입력기"          # 바로가기 이름(.lnk 제외)
@@ -42,6 +45,28 @@ def resource_path(name: str) -> str:
     if base:
         return os.path.join(base, name)
     return os.path.join(os.path.dirname(os.path.abspath(__file__)), "dist", name)
+
+
+def apply_seed(seed_file: Path, cfg_file: Path | None = None) -> str:
+    """번들된 초기 설정(seed_config.json: API 키·모델)을 사용자 설정에 적용한다.
+
+    설정이 없거나 API 키가 비어 있을 때만 적용하고, 이미 키가 있으면 절대 덮어쓰지
+    않는다. 키 포함 설치 파일(installer.spec + TRANS_EMBED_KEY=1)에서만 seed 가 있다.
+    결과 안내문을 돌려준다(적용할 seed 가 없으면 빈 문자열).
+    """
+    try:
+        seed = json.loads(Path(seed_file).read_text(encoding="utf-8"))
+        if not isinstance(seed, dict) or not seed.get("openrouter_api_key"):
+            return ""
+    except (OSError, ValueError):
+        return ""
+    p = Path(cfg_file) if cfg_file is not None else config_path()
+    cfg = load_config(p)  # 없으면 기본값으로 생성
+    if cfg.get("openrouter_api_key"):
+        return "기존 설정(API 키)을 그대로 유지했습니다."
+    cfg.update({k: v for k, v in seed.items() if k in cfg and v})
+    save_config(cfg, p)
+    return "API 키가 미리 설정되어 있어 바로 사용할 수 있습니다."
 
 
 def _special_folder(shell, key: str, fallback: str) -> str:
@@ -106,15 +131,21 @@ def main() -> int:
         except Exception as e:  # 한쪽 실패해도 설치 자체는 진행
             print(f"[경고] 바로가기 생성 실패({folder}): {e}", flush=True)
 
+    # 3) 키 포함 설치 파일이면 초기 설정(API 키) 적용 — 기존 키는 덮어쓰지 않음
+    seed_msg = apply_seed(Path(resource_path("seed_config.json")))
+
     print(f"설치 위치: {dst}", flush=True)
     for m in made:
         print(f"바로가기: {m}", flush=True)
+    if seed_msg:
+        print(f"설정: {seed_msg}", flush=True)
 
     msgbox(
         f"설치가 완료되었습니다.\n\n"
         f"설치 위치:\n{dst}\n\n"
-        f"바탕화면 바로가기와 시작프로그램(로그인 시 자동 실행) 등록 완료.\n\n"
-        f"지금 실행하려면 바탕화면의 '번역입력기' 바로가기를 더블클릭하세요.",
+        f"바탕화면 바로가기와 시작프로그램(로그인 시 자동 실행) 등록 완료.\n"
+        + (f"{seed_msg}\n" if seed_msg else "")
+        + "\n지금 실행하려면 바탕화면의 '번역입력기' 바로가기를 더블클릭하세요.",
         icon=0x40,
     )
 
