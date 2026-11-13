@@ -247,20 +247,25 @@ class App:
 
     def _start_translation(self, popup: Popup, text: str, target_hwnd: int) -> None:
         cfg = self.cfg
+        t_submit = time.perf_counter()  # Enter 시점 — 단계별 지연 계측 기준
 
         def worker() -> None:
+            timings: dict = {}
             try:
                 translated = translate(
                     text, cfg["target_language"],
                     cfg["openrouter_api_key"], cfg["model"],
+                    timings=timings,
                 )
             except TranslationError as e:
+                log(f"TIME: 번역 실패 {timings}")
                 self.post(lambda: popup.show_error(str(e)))
                 return
             except Exception as e:  # 예기치 못한 오류도 사용자에게 표시
                 self.post(lambda: popup.show_error(f"오류: {e}"))
                 return
 
+            log(f"TIME: 번역 {timings}")
             log(f"번역결과({cfg.get('target_language')}): {translated[:50]!r}")
             if not translated:
                 self.post(popup.close)
@@ -268,24 +273,29 @@ class App:
 
             # 순서 보장: 메인 스레드에서 팝업을 '먼저 닫고' → 포커스 복귀 대기 → 주입.
             # (즉시 주입하면 팝업이 아직 떠 있어 Ctrl+V가 팝업으로 들어가는 경합 발생)
-            self.post(lambda: self._finish_and_paste(popup, target_hwnd, translated))
+            self.post(lambda: self._finish_and_paste(popup, target_hwnd, translated, t_submit))
 
         threading.Thread(target=worker, daemon=True).start()
 
-    def _finish_and_paste(self, popup: Popup, target_hwnd: int, text: str) -> None:
+    def _finish_and_paste(self, popup: Popup, target_hwnd: int, text: str,
+                          t_submit: float) -> None:
         """메인 스레드: 팝업을 닫은 뒤, 포커스가 대상으로 돌아가면 주입한다."""
         popup.close()  # 먼저 확실히 닫아 포커스를 대상 창으로 반환
         # 주입은 sleep 을 포함하므로 워커 스레드에서, 포커스 복귀 후(150ms) 실행
         self.root.after(150, lambda: threading.Thread(
-            target=self._paste_worker, args=(target_hwnd, text), daemon=True).start())
+            target=self._paste_worker, args=(target_hwnd, text, t_submit),
+            daemon=True).start())
 
     @staticmethod
-    def _paste_worker(target_hwnd: int, text: str) -> None:
+    def _paste_worker(target_hwnd: int, text: str, t_submit: float) -> None:
         log(f"주입 시작(hwnd={target_hwnd}): {text[:50]!r}")
+        log(f"TIME: Enter→주입 시작 {(time.perf_counter() - t_submit) * 1000:.0f}ms")
         try:
             paste_into(target_hwnd, text)
         except Exception as e:
             print("[inject] error:", e)
+        # paste_into 는 Ctrl+V 뒤 클립보드 복원 대기(paste_delay)까지 포함한다.
+        log(f"TIME: Enter→주입 완료 {(time.perf_counter() - t_submit) * 1000:.0f}ms")
 
     @staticmethod
     def _is_editable(c) -> bool:
