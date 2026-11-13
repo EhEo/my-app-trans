@@ -68,34 +68,55 @@ def _drop() -> None:
     _conn = None
 
 
+def _usable() -> bool:
+    """지금 연결을 그대로 써도 되는지(열려 있고 오래 놀지 않음). _lock 을 잡은 상태에서 호출."""
+    return (_conn is not None and _conn.sock is not None
+            and time.monotonic() - _last_used <= STALE_AFTER)
+
+
+def _install(conn: http.client.HTTPSConnection) -> None:
+    """새로 맺은 연결을 현재 연결로 설치한다. _lock 을 잡은 상태에서 호출."""
+    global _conn, _last_used
+    _drop()
+    _conn = conn
+    _last_used = time.monotonic()
+
+
 def _ensure_connected() -> tuple[http.client.HTTPSConnection, bool]:
     """열린 연결을 돌려준다. (conn, reused) — reused 는 이미 열려 있던 연결인지 여부.
 
     닫혔거나 STALE_AFTER 이상 놀던 연결은 버리고 새로 맺는다. _lock 을 잡은 상태에서 호출.
     """
-    global _conn, _last_used
-    if _conn is not None and (
-            _conn.sock is None or time.monotonic() - _last_used > STALE_AFTER):
-        _drop()
-    if _conn is not None:
+    if _conn is not None and _usable():
         return _conn, True
     conn = _new_connection()
     conn.connect()
-    _conn = conn
-    _last_used = time.monotonic()
+    _install(conn)
     return conn, False
 
 
 def prewarm() -> None:
     """번역 서버와의 연결을 미리 맺어 둔다(백그라운드 스레드에서 호출).
 
+    connect 는 락 밖에서 한다 — 응답 없이 패킷이 버려지는 네트워크에서 connect 가
+    타임아웃까지 매달려도 그사이 시작된 번역이 기다리지 않게 하기 위해서다.
+    끝났을 때 이미 쓸 만한 연결이 생겼으면 새로 맺은 것은 버린다.
     실패해도 조용히 무시한다 — 실제 번역 때 다시 연결을 시도하고 그때 오류를 보여준다.
     """
     with _lock:
-        try:
-            _ensure_connected()
-        except Exception:
-            _drop()
+        if _usable():
+            return
+    conn = _new_connection()
+    try:
+        conn.connect()
+    except Exception:
+        conn.close()
+        return
+    with _lock:
+        if _usable():
+            conn.close()
+        else:
+            _install(conn)
 
 
 def _ms(start: float) -> int:

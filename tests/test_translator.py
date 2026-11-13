@@ -2,6 +2,7 @@
 import http.client
 import io
 import sys
+import threading
 import time
 import unittest
 from pathlib import Path
@@ -171,6 +172,28 @@ class TestPrewarm(TranslatorTestBase):
         with self.use_conns(FakeConn([], connect_error=OSError("offline"))):
             translator.prewarm()  # 예외가 새어 나오지 않아야 한다
         self.assertIsNone(translator._conn)
+
+    def test_slow_prewarm_does_not_block_translate(self):
+        """prewarm 의 connect 가 매달려 있어도 번역은 기다리지 않고 자기 연결로 진행한다."""
+        entered, release = threading.Event(), threading.Event()
+
+        class SlowConn(FakeConn):
+            def connect(self):
+                entered.set()
+                release.wait(5)
+                super().connect()
+
+        slow, fast = SlowConn([]), FakeConn([ok("done")])
+        with self.use_conns(slow, fast):
+            th = threading.Thread(target=translator.prewarm)
+            th.start()
+            self.assertTrue(entered.wait(2))
+            out = translator.translate("x", "영어", "key", "m")  # 블록되면 여기서 멈춘다
+            self.assertEqual(out, "done")
+            release.set()
+            th.join(2)
+        self.assertIs(translator._conn, fast)  # 늦게 끝난 prewarm 은 자기 연결을 버린다
+        self.assertIsNone(slow.sock)
 
     def test_prewarm_keeps_existing_live_connection(self):
         with self.use_conns(FakeConn([ok("a")])):
