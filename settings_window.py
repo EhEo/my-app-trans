@@ -173,7 +173,9 @@ class SettingsWindow:
         mb.configure(menu=menu)
         arrow = tk.Label(box, text="▾", font=font, bg=CARD, fg=TEXT3, cursor="hand2")
         arrow.pack(side="right", padx=(0, 8))
-        arrow.bind("<Button-1>", lambda e: menu.post(
+        # post() 는 grab 을 잡지 않아 창이 포커스를 잃으면 메뉴가 화면에 남을 수 있다
+        # (3d3223d 의 고아 메뉴와 같은 유형) → tk_popup 으로 연다.
+        arrow.bind("<Button-1>", lambda e: menu.tk_popup(
             mb.winfo_rootx(), mb.winfo_rooty() + mb.winfo_height()))
         mb.pack(side="left", fill="x", expand=True)
         return box
