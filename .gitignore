@@ -13,3 +13,7 @@ preview_*.png
 # IDE
 .vscode/
 .idea/
+
+# Claude Code(OMC) 세션 상태 — 세션마다 자동으로 바뀜
+.omc/state/
+.omc/sessions/
