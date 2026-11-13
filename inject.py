@@ -120,11 +120,15 @@ def paste_into(hwnd: int, text: str,
     _dlog(f"기존 클립보드 backup={backup[:30]!r}" if backup else "기존 클립보드 비어있음")
 
     pyperclip.copy(text)
-    _dlog(f"클립보드에 복사한 번역문={text[:40]!r} / 확인={pyperclip.paste()[:40]!r}")
+    # f-string 은 _dlog 호출 전에 평가되므로, 클립보드 확인 읽기는 DEBUG 일 때만 한다
+    # (그렇지 않으면 디버그가 꺼져 있어도 매번 클립보드를 더 읽어 대상 앱과 경합한다).
+    if DEBUG:
+        _dlog(f"클립보드에 복사한 번역문={text[:40]!r} / 확인={pyperclip.paste()[:40]!r}")
     force_foreground(hwnd)
     time.sleep(focus_delay)
     keyboard.send("ctrl+v")
-    _dlog(f"Ctrl+V 전송 (hwnd={hwnd}) / 현재 클립보드={pyperclip.paste()[:40]!r}")
+    if DEBUG:
+        _dlog(f"Ctrl+V 전송 (hwnd={hwnd}) / 현재 클립보드={pyperclip.paste()[:40]!r}")
     time.sleep(paste_delay)
 
     if backup is not None:
