@@ -29,7 +29,7 @@ from hotkey import HotkeyManager, parse_hotkey
 from inject import paste_into, release_modifiers
 from popup import Popup
 from settings_window import SettingsWindow
-from translator import TranslationError, translate
+from translator import TranslationError, prewarm, translate
 
 user32 = ctypes.windll.user32
 kernel32 = ctypes.windll.kernel32
@@ -176,6 +176,8 @@ class App:
         # 팝업을 띄우기 직전의 전경 창 = 글을 넣을 대상
         target_hwnd = user32.GetForegroundWindow()
         log(f"L3/L4: show_popup 실행 (대상 hwnd={target_hwnd})")
+        # 사용자가 타이핑하는 동안 번역 서버 연결(DNS/TCP/TLS)을 미리 맺어 둔다.
+        threading.Thread(target=prewarm, daemon=True).start()
         try:
             # 단축키의 Ctrl/Alt 가 OS 상태에 남아 있으면 팝업 입력란에서
             # 한글 첫 글자가 단축키로 가로채여 입력이 안 된다. 먼저 강제 해제.
