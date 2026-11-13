@@ -29,7 +29,7 @@ from hotkey import HotkeyManager, parse_hotkey
 from inject import paste_into, release_modifiers
 from popup import Popup
 from settings_window import SettingsWindow
-from translator import TranslationError, prewarm, translate
+from translator import TranslationError, prewarm, translate, warmup
 
 user32 = ctypes.windll.user32
 kernel32 = ctypes.windll.kernel32
@@ -176,8 +176,8 @@ class App:
         # 팝업을 띄우기 직전의 전경 창 = 글을 넣을 대상
         target_hwnd = user32.GetForegroundWindow()
         log(f"L3/L4: show_popup 실행 (대상 hwnd={target_hwnd})")
-        # 사용자가 타이핑하는 동안 번역 서버 연결(DNS/TCP/TLS)을 미리 맺어 둔다.
-        threading.Thread(target=prewarm, daemon=True).start()
+        # 사용자가 타이핑하는 동안 번역 서버 연결을 맺고, 쉬었다 온 경우 서버 경로도 데운다.
+        threading.Thread(target=self._prewarm_worker, daemon=True).start()
         try:
             # 단축키의 Ctrl/Alt 가 OS 상태에 남아 있으면 팝업 입력란에서
             # 한글 첫 글자가 단축키로 가로채여 입력이 안 된다. 먼저 강제 해제.
@@ -203,6 +203,15 @@ class App:
             self._popup_active = False
             self._hotkey_inflight = False
             raise
+
+    def _prewarm_worker(self) -> None:
+        """백그라운드: 연결 준비(DNS/TCP/TLS) → 1분 넘게 쉬었으면 1토큰 예열 요청.
+
+        예열은 번역과 별도 연결이라, 사용자가 빨리 Enter 를 눌러도 번역이 기다리지 않는다.
+        """
+        prewarm()
+        if warmup(self.cfg.get("openrouter_api_key", ""), self.cfg.get("model", "")):
+            log("예열: 1토큰 요청으로 서버 경로를 데움")
 
     def _register_esc(self) -> None:
         """팝업이 열린 동안 Esc를 전역에서 가로채 팝업만 닫는다.

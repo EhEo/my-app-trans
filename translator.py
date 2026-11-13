@@ -23,12 +23,17 @@ API_URL = f"https://{HOST}{PATH}"
 TIMEOUT = 30
 # 이 시간(초) 이상 놀던 연결은 서버가 이미 닫았을 수 있으므로 쓰기 전에 새로 맺는다.
 STALE_AFTER = 45.0
+# 마지막 서버 요청 후 이 시간(초)이 지나야 예열 요청을 보낸다. 쉬는 동안 서버 쪽 경로가
+# 식으면 첫 바이트가 ~450ms 느려지는데(실측), 그 이내면 아직 따뜻해 예열이 필요 없다.
+WARM_AFTER = 60.0
 
 # 연결 상태 — 모두 _lock 을 잡은 채로만 읽고 쓴다(워커/prewarm 스레드 공유).
 _lock = threading.Lock()
 _conn: http.client.HTTPSConnection | None = None
 _last_used = 0.0
 _ssl_ctx: ssl.SSLContext | None = None
+_last_activity = 0.0    # 마지막으로 서버가 응답한 시각(번역·예열 공통)
+_warming = False        # 예열 요청이 진행 중인지(동시에 하나만)
 
 
 class TranslationError(Exception):
@@ -119,6 +124,50 @@ def prewarm() -> None:
             _install(conn)
 
 
+def _headers(api_key: str) -> dict:
+    return {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+        # OpenRouter 권장(선택) 헤더 — 호출 출처 식별용
+        "HTTP-Referer": "https://github.com/local/my-app-trans",
+        "X-Title": "my-app-trans",
+    }
+
+
+def warmup(api_key: str, model: str) -> bool:
+    """같은 모델에 1토큰짜리 요청을 보내 서버 쪽 경로(OpenRouter→공급자)를 데운다.
+
+    팝업이 뜰 때 백그라운드 스레드에서 호출한다. 번역과 락·연결을 공유하지 않아서
+    예열이 진행 중이어도 번역은 기다리지 않는다. 마지막 서버 요청 후 WARM_AFTER 초가
+    지나지 않았거나 이미 예열 중이면 보내지 않는다. 보냈고 성공했으면 True.
+    """
+    global _warming, _last_activity
+    if not api_key or not model:
+        return False
+    with _lock:
+        if _warming or time.monotonic() - _last_activity < WARM_AFTER:
+            return False
+        _warming = True
+    conn = _new_connection()
+    try:
+        body = json.dumps({"model": model, "max_tokens": 1,
+                           "messages": [{"role": "user", "content": "hi"}]})
+        conn.request("POST", PATH, body=body.encode("utf-8"), headers=_headers(api_key))
+        resp = conn.getresponse()
+        resp.read()
+        if resp.status >= 400:
+            return False
+        with _lock:
+            _last_activity = time.monotonic()
+        return True
+    except Exception:
+        return False
+    finally:
+        conn.close()
+        with _lock:
+            _warming = False
+
+
 def _ms(start: float) -> int:
     return int((time.perf_counter() - start) * 1000)
 
@@ -133,7 +182,7 @@ def translate(text: str, target_language: str, api_key: str, model: str,
     Raises:
         TranslationError: 키 없음/네트워크 오류/응답 파싱 실패 시.
     """
-    global _last_used
+    global _last_used, _last_activity
     if not api_key:
         raise TranslationError("OpenRouter API 키가 없습니다. 설정을 확인하세요.")
     if not text.strip():
@@ -145,13 +194,7 @@ def translate(text: str, target_language: str, api_key: str, model: str,
         "messages": _build_messages(text, target_language),
     }
     data = json.dumps(payload).encode("utf-8")
-    headers = {
-        "Authorization": f"Bearer {api_key}",
-        "Content-Type": "application/json",
-        # OpenRouter 권장(선택) 헤더 — 호출 출처 식별용
-        "HTTP-Referer": "https://github.com/local/my-app-trans",
-        "X-Title": "my-app-trans",
-    }
+    headers = _headers(api_key)
 
     status, body = 0, ""
     t0 = time.perf_counter()
@@ -170,7 +213,7 @@ def translate(text: str, target_language: str, api_key: str, model: str,
                 t["ttfb_ms"] = _ms(ts)
                 body = (first + resp.read()).decode("utf-8", "replace")
                 status = resp.status
-                _last_used = time.monotonic()
+                _last_used = _last_activity = time.monotonic()
                 break
             except TimeoutError as e:
                 # 타임아웃은 재시도하지 않는다(30초 대기가 두 번 겹치지 않게).

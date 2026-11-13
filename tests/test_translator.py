@@ -58,6 +58,8 @@ class TranslatorTestBase(unittest.TestCase):
     def setUp(self) -> None:
         translator._conn = None
         translator._last_used = 0.0
+        translator._last_activity = 0.0
+        translator._warming = False
         self.conns: list[FakeConn] = []
 
     def tearDown(self) -> None:
@@ -200,6 +202,58 @@ class TestPrewarm(TranslatorTestBase):
             translator.prewarm()
             translator.prewarm()
         self.assertEqual(len(self.conns), 1)
+
+
+class TestWarmup(TranslatorTestBase):
+    def test_warmup_sends_one_token_request_on_separate_connection(self):
+        warm = FakeConn([ok("h")])
+        with self.use_conns(warm):
+            self.assertTrue(translator.warmup("key", "m"))
+        self.assertEqual(warm.requests, 1)
+        self.assertIsNone(translator._conn)  # 번역용 연결은 건드리지 않는다
+        self.assertIsNone(warm.sock)         # 예열 연결은 닫고 버린다
+
+    def test_warmup_skipped_right_after_translation(self):
+        with self.use_conns(FakeConn([ok("a")])):
+            translator.translate("x", "영어", "key", "m")
+            self.assertFalse(translator.warmup("key", "m"))
+        self.assertEqual(len(self.conns), 1)
+
+    def test_warmup_runs_again_after_idle(self):
+        with self.use_conns(FakeConn([ok("a")]), FakeConn([ok("h")])):
+            translator.translate("x", "영어", "key", "m")
+            translator._last_activity = time.monotonic() - translator.WARM_AFTER - 1
+            self.assertTrue(translator.warmup("key", "m"))
+
+    def test_warmup_needs_key_and_model(self):
+        self.assertFalse(translator.warmup("", "m"))
+        self.assertFalse(translator.warmup("key", ""))
+
+    def test_warmup_failure_is_swallowed_and_releases_flag(self):
+        with self.use_conns(FakeConn([ConnectionResetError("x")])):
+            self.assertFalse(translator.warmup("key", "m"))
+        self.assertFalse(translator._warming)
+
+    def test_only_one_warmup_at_a_time(self):
+        translator._warming = True
+        self.assertFalse(translator.warmup("key", "m"))
+
+    def test_inflight_warmup_does_not_block_translate(self):
+        entered, release = threading.Event(), threading.Event()
+
+        class SlowWarm(FakeConn):
+            def getresponse(self):
+                entered.set()
+                release.wait(5)
+                return super().getresponse()
+
+        with self.use_conns(SlowWarm([ok("h")]), FakeConn([ok("done")])):
+            th = threading.Thread(target=translator.warmup, args=("key", "m"))
+            th.start()
+            self.assertTrue(entered.wait(2))
+            self.assertEqual(translator.translate("x", "영어", "key", "m"), "done")
+            release.set()
+            th.join(2)
 
 
 if __name__ == "__main__":
