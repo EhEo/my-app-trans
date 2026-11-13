@@ -1,8 +1,8 @@
-# 트레이에서 여는 설정 창 - 단축키는 Ctrl/Shift/Alt 체크박스 + 1자 키 조합으로 편집
+# 트레이에서 여는 설정 창 - 단축키는 Ctrl/Shift/Alt 키캡 토글 + 1자 키 조합으로 편집
 """트레이에서 여는 설정 창.
 
 API 키 / 모델 / 목표 언어 / 단축키를 편집하고 저장한다.
-단축키는 Ctrl·Shift·Alt 체크박스(멀티 선택) + 키 1자 입력으로 구성된다.
+단축키는 Ctrl·Shift·Alt 키캡 토글(멀티 선택) + 키 1자 입력으로 구성된다.
 저장 시 'ctrl + shift + z' 형태로 직렬화된다(RegisterHotKey 는 좌/우를 구분하지
 않으므로 통합 표기).
 메인 스레드에서만 생성/사용할 것.
@@ -10,11 +10,15 @@ API 키 / 모델 / 목표 언어 / 단축키를 편집하고 저장한다.
 from __future__ import annotations
 
 import tkinter as tk
-from tkinter import ttk
 from typing import Callable
 
 from config import LANGUAGES
-from ui import font_family
+from ui import (ACCENT, ACCENT_DARK, ACCENT_TINT, CARD, ERR, HAIRLINE, OK,
+                OUTLINE, SURFACE, TEXT1, TEXT2, TEXT3, font_family)
+
+PAD = 24        # 창 가장자리 여백(px)
+ROW_GAP = 12    # 같은 섹션 안의 행 간격
+LABEL_W = 88    # 왼쪽 라벨 열 최소 폭
 
 
 def _parse_hotkey(hk: str) -> tuple[dict, str]:
@@ -53,106 +57,157 @@ class SettingsWindow:
         win = tk.Toplevel(root)
         self.win = win
         win.title("번역 입력기 설정")
-        win.geometry("440x430")
         win.resizable(False, False)
         win.attributes("-topmost", True)
-        win.configure(bg="#ffffff")
+        win.configure(bg=CARD)
 
         fam = font_family(root)
+        self.fam = fam
         LBL = (fam, 9)
-        ENT = (fam, 9)
-        HINT = (fam, 8)
-        pad = {"padx": 10, "pady": 3}
-        frm = tk.Frame(win, bg="#ffffff")
-        frm.pack(fill="both", expand=True, padx=8, pady=6)
+        ENT = (fam, 10)
 
-        def label(text, row):
-            tk.Label(frm, text=text, font=LBL, bg="#ffffff", fg="#202124").grid(
-                row=row, column=0, sticky="nw", **pad)
+        frm = tk.Frame(win, bg=CARD)
+        frm.pack(fill="both", expand=True, padx=PAD, pady=(PAD - 4, 8))
+        frm.columnconfigure(0, minsize=LABEL_W)
+        frm.columnconfigure(1, weight=1)
+        self._row = 0
 
-        label("OpenRouter API 키", 0)
+        def section(text: str, first: bool = False) -> None:
+            tk.Label(frm, text=text, font=LBL, bg=CARD, fg=TEXT3).grid(
+                row=self._row, column=0, columnspan=2, sticky="w",
+                pady=(0 if first else ROW_GAP, 8))
+            self._row += 1
+
+        def row(text: str, widget: tk.Widget, gap: int = ROW_GAP) -> None:
+            tk.Label(frm, text=text, font=LBL, bg=CARD, fg=TEXT2).grid(
+                row=self._row, column=0, sticky="w", pady=(0, gap))
+            widget.grid(row=self._row, column=1, sticky="we", pady=(0, gap))
+            self._row += 1
+
+        # --- 연결 ---
+        section("연결", first=True)
         self.key_var = tk.StringVar(value=cfg.get("openrouter_api_key", ""))
-        tk.Entry(frm, textvariable=self.key_var, width=32, show="•",
-                 font=ENT).grid(row=0, column=1, sticky="we", **pad)
-
-        label("모델", 1)
+        row("API 키", self._field(frm, self.key_var, ENT, show="•"))
         self.model_var = tk.StringVar(value=cfg.get("model", ""))
-        tk.Entry(frm, textvariable=self.model_var, width=32, font=ENT).grid(
-            row=1, column=1, sticky="we", **pad)
+        row("모델", self._field(frm, self.model_var, ENT))
 
-        label("목표 언어", 2)
+        # --- 입력 ---
+        section("입력")
         self.lang_var = tk.StringVar(value=cfg.get("target_language", "영어"))
-        ttk.Combobox(frm, textvariable=self.lang_var,
-                     values=list(LANGUAGES.keys()), state="readonly",
-                     width=30).grid(row=2, column=1, sticky="we", **pad)
-
-        # --- 단축키 영역 ---
-        label("단축키", 3)
-        hk = tk.Frame(frm, bg="#ffffff")
-        hk.grid(row=3, column=1, sticky="we", **pad)
+        row("번역 언어", self._lang_picker(frm, ENT))
 
         state, key = _parse_hotkey((cfg.get("hotkey") or "").lower())
         self.ctrl_var = tk.BooleanVar(value=state["ctrl"])
         self.shift_var = tk.BooleanVar(value=state["shift"])
         self.alt_var = tk.BooleanVar(value=state["alt"])
-
-        def mod_row(text: str, var: tk.BooleanVar, r: int) -> None:
-            tk.Checkbutton(hk, text=text, variable=var, bg="#ffffff",
-                           activebackground="#ffffff", font=LBL).grid(
-                row=r, column=0, columnspan=2, sticky="w")
-
-        mod_row("Ctrl", self.ctrl_var, 0)
-        mod_row("Shift", self.shift_var, 1)
-        mod_row("Alt", self.alt_var, 2)
-
-        # 키 1자 입력
-        tk.Label(hk, text="키", font=LBL, bg="#ffffff",
-                 width=6, anchor="w").grid(row=3, column=0, sticky="w", pady=(6, 0))
         self.key_char_var = tk.StringVar(value=key[:1] if len(key) == 1 else "")
+        row("단축키", self._hotkey_row(frm), gap=4)
+        tk.Label(frm, text="글자 키 한 개 (예: z, a, 1)", font=LBL, bg=CARD,
+                 fg=TEXT3).grid(row=self._row, column=1, sticky="w",
+                                pady=(0, ROW_GAP))
+        self._row += 1
+
+        self.auto_var = tk.BooleanVar(value=bool(cfg.get("auto_mode", False)))
+        row("자동 열기", tk.Checkbutton(
+            frm, text="입력란을 클릭하면 열기 (실험적)", variable=self.auto_var,
+            font=LBL, bg=CARD, fg=TEXT1, activebackground=CARD,
+            activeforeground=TEXT1, selectcolor=CARD, bd=0,
+            highlightthickness=0, anchor="w", cursor="hand2"), gap=0)
+
+        # --- 하단: 결과 메시지 + 버튼 ---
+        tk.Frame(win, bg=HAIRLINE, height=1).pack(fill="x", pady=(16, 0))
+        foot = tk.Frame(win, bg=CARD)
+        foot.pack(fill="x", padx=PAD, pady=16)
+        self.msg = tk.Label(foot, text="", font=LBL, bg=CARD, fg=OK, anchor="w")
+        self.msg.pack(side="left", fill="x", expand=True)
+        btn = {"font": LBL, "relief": "flat", "bd": 0, "padx": 16, "pady": 6,
+               "cursor": "hand2", "highlightthickness": 0}
+        tk.Button(foot, text="저장", command=self._save, bg=ACCENT, fg="#ffffff",
+                  activebackground=ACCENT_DARK, activeforeground="#ffffff",
+                  **btn).pack(side="right")
+        tk.Button(foot, text="닫기", command=self.close, bg=SURFACE, fg=TEXT1,
+                  activebackground=HAIRLINE, activeforeground=TEXT1,
+                  **btn).pack(side="right", padx=(0, 8))
+
+        for v in (self.ctrl_var, self.shift_var, self.alt_var):
+            v.trace_add("write", lambda *_: self._update_preview())
+        self._update_preview()
+
+        win.lift()
+        win.focus_force()
+
+    # --- 위젯 빌더 ---
+    @staticmethod
+    def _bordered(parent: tk.Misc) -> tk.Frame:
+        """헤어라인 테두리 상자. 안쪽 위젯이 포커스를 받으면 테두리가 강조색이 된다."""
+        return tk.Frame(parent, bg=CARD, highlightthickness=1,
+                        highlightbackground=OUTLINE, highlightcolor=OUTLINE)
+
+    @staticmethod
+    def _focus_ring(box: tk.Frame, widget: tk.Widget) -> None:
+        widget.bind("<FocusIn>", lambda e: box.configure(highlightbackground=ACCENT),
+                    add="+")
+        widget.bind("<FocusOut>", lambda e: box.configure(highlightbackground=OUTLINE),
+                    add="+")
+
+    def _field(self, parent: tk.Misc, var: tk.StringVar, font, **kw) -> tk.Frame:
+        """평면 입력칸(테두리 상자 + 안쪽 여백 8px + 포커스 링)."""
+        box = self._bordered(parent)
+        ent = tk.Entry(box, textvariable=var, font=font, relief="flat", bd=0,
+                       bg=CARD, fg=TEXT1, insertbackground=TEXT1,
+                       highlightthickness=0, width=30, **kw)
+        ent.pack(fill="x", padx=8, pady=6)
+        self._focus_ring(box, ent)
+        return box
+
+    def _lang_picker(self, parent: tk.Misc, font) -> tk.Frame:
+        """입력칸 모양의 언어 선택 — 팝업의 언어 메뉴와 같은 방식(라디오 메뉴)."""
+        box = self._bordered(parent)
+        mb = tk.Menubutton(box, textvariable=self.lang_var, font=font, anchor="w",
+                           relief="flat", bd=0, bg=CARD, fg=TEXT1,
+                           activebackground=CARD, activeforeground=TEXT1,
+                           padx=8, pady=6, cursor="hand2", takefocus=1)
+        menu = tk.Menu(mb, tearoff=0, font=font)
+        for lang in LANGUAGES:
+            menu.add_radiobutton(label=lang, variable=self.lang_var, value=lang)
+        mb.configure(menu=menu)
+        arrow = tk.Label(box, text="▾", font=font, bg=CARD, fg=TEXT3, cursor="hand2")
+        arrow.pack(side="right", padx=(0, 8))
+        arrow.bind("<Button-1>", lambda e: menu.post(
+            mb.winfo_rootx(), mb.winfo_rooty() + mb.winfo_height()))
+        mb.pack(side="left", fill="x", expand=True)
+        return box
+
+    def _hotkey_row(self, parent: tk.Misc) -> tk.Frame:
+        """[Ctrl] + [Shift] + [Alt] + [z] — 켜진 수식키는 강조색 키캡으로 보인다."""
+        rowf = tk.Frame(parent, bg=CARD)
+        self._mod_btns: list[tuple[tk.Checkbutton, tk.BooleanVar]] = []
+        for text, var in (("Ctrl", self.ctrl_var), ("Shift", self.shift_var),
+                          ("Alt", self.alt_var)):
+            b = tk.Checkbutton(rowf, text=text, variable=var, indicatoron=False,
+                               font=(self.fam, 9), bd=0, padx=12, pady=4,
+                               bg=SURFACE, selectcolor=ACCENT_TINT,
+                               activebackground=SURFACE, highlightthickness=1,
+                               cursor="hand2")
+            b.pack(side="left")
+            tk.Label(rowf, text="+", font=(self.fam, 9), bg=CARD,
+                     fg=TEXT3).pack(side="left", padx=6)
+            self._mod_btns.append((b, var))
 
         def _max1(P: str) -> bool:
             return len(P) <= 1
 
-        vcmd = (win.register(_max1), "%P")
-        key_entry = tk.Entry(hk, textvariable=self.key_char_var, width=4,
-                             font=ENT, justify="center",
-                             validate="key", validatecommand=vcmd)
-        key_entry.grid(row=3, column=1, sticky="w", pady=(6, 0))
-        tk.Label(hk, text="(글자 한 개 — 예: z, a, 1)",
-                 fg="#9aa0a6", bg="#ffffff", font=HINT).grid(
-            row=3, column=2, sticky="w", padx=4, pady=(6, 0))
-
-        # 현재 조합 미리보기
-        self.hk_preview = tk.Label(hk, text="", fg="#5f6368", bg="#ffffff",
-                                    font=HINT)
-        self.hk_preview.grid(row=4, column=0, columnspan=3, sticky="w",
-                              pady=(4, 0))
-        for v in (self.ctrl_var, self.shift_var, self.alt_var):
-            v.trace_add("write", lambda *_: self._update_preview())
-        self.key_char_var.trace_add("write", lambda *_: self._update_preview())
-        self._update_preview()
-
-        # 자동 감지 모드
-        self.auto_var = tk.BooleanVar(value=bool(cfg.get("auto_mode", False)))
-        tk.Checkbutton(frm, text="자동 감지 (입력란 클릭 시 자동 팝업)",
-                       variable=self.auto_var, font=LBL, bg="#ffffff",
-                       activebackground="#ffffff").grid(
-            row=4, column=0, columnspan=2, sticky="w", padx=8, pady=(8, 0))
-
-        self.msg = tk.Label(frm, text="", fg="#188038", bg="#ffffff", font=HINT)
-        self.msg.grid(row=5, column=0, columnspan=2, sticky="w",
-                       padx=10, pady=(6, 0))
-
-        btns = tk.Frame(win, bg="#ffffff")
-        btns.pack(side="bottom", fill="x", padx=12, pady=8)
-        tk.Button(btns, text="저장", width=8, font=LBL,
-                  command=self._save).pack(side="right")
-        tk.Button(btns, text="닫기", width=8, font=LBL,
-                  command=self.close).pack(side="right", padx=6)
-
-        frm.columnconfigure(1, weight=1)
-        win.lift()
-        win.focus_force()
+        # 키 입력칸은 옆 키캡과 같은 높이(9pt + 위아래 4px + 테두리 1px)로 맞춘다.
+        box = self._bordered(rowf)
+        ent = tk.Entry(box, textvariable=self.key_char_var, width=3,
+                       font=(self.fam, 9), justify="center", relief="flat", bd=0,
+                       bg=CARD, fg=TEXT1, insertbackground=TEXT1,
+                       highlightthickness=0, validate="key",
+                       validatecommand=(self.win.register(_max1), "%P"))
+        ent.pack(padx=4, pady=4)
+        self._focus_ring(box, ent)
+        box.pack(side="left")
+        return rowf
 
     def _build_hotkey(self) -> str:
         """체크박스 + 키 문자를 'ctrl + shift + z' 형태로 직렬화."""
@@ -169,14 +224,19 @@ class SettingsWindow:
         return " + ".join(parts)
 
     def _update_preview(self) -> None:
-        hk = self._build_hotkey()
-        self.hk_preview.configure(text=f"현재 조합: {hk}" if hk else "현재 조합: (비어있음)")
+        """수식키 키캡의 켜짐/꺼짐을 글자색·테두리로 보여준다."""
+        for b, var in self._mod_btns:
+            on = var.get()
+            b.configure(fg=ACCENT_DARK if on else TEXT2,
+                        activeforeground=ACCENT_DARK if on else TEXT2,
+                        highlightbackground=ACCENT if on else HAIRLINE,
+                        highlightcolor=ACCENT if on else HAIRLINE)
 
     def _save(self) -> None:
         hotkey = self._build_hotkey()
         key = (self.key_char_var.get() or "").strip()
         if not key:
-            self.msg.configure(text="키 1글자를 입력해주세요.", fg="#c0392b")
+            self.msg.configure(text="단축키 글자를 입력해주세요.", fg=ERR)
             return
         new_cfg = {
             "openrouter_api_key": self.key_var.get().strip(),
@@ -187,8 +247,7 @@ class SettingsWindow:
         }
         result = self.on_save(new_cfg)
         ok = bool(result) and "실패" not in result
-        self.msg.configure(text=result or "저장되었습니다.",
-                           fg="#2a8a2a" if ok else "#c0392b")
+        self.msg.configure(text=result or "저장되었습니다.", fg=OK if ok else ERR)
 
     def close(self) -> None:
         if self.win.winfo_exists():
