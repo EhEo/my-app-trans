@@ -12,11 +12,13 @@ import tkinter as tk
 from ctypes import wintypes
 from typing import Callable
 
-from ui import font_family
+from ui import (ACCENT, CARD, ERR, HAIRLINE, OUTLINE, TEXT1, TEXT3,
+                font_family, keycap)
 
 _user32 = ctypes.windll.user32
 _kernel32 = ctypes.windll.kernel32
 _imm32 = ctypes.windll.imm32
+_dwmapi = ctypes.windll.dwmapi
 
 
 class _LOGFONTW(ctypes.Structure):
@@ -38,26 +40,47 @@ class _LOGFONTW(ctypes.Structure):
         ("lfFaceName", ctypes.c_wchar * 32),
     ]
 
-# 라이트 테마
-BG = "#fdfdfc"          # 본문(안쪽 카드) 배경
-OUTER = "#eeeeec"       # 바깥 창(사각형) 배경 — 둥근 카드 코너에 비치는 색
-FG = "#202124"          # 본문 글자
-ACCENT = "#1a73e8"      # 포커스/강조
-ERR = "#d93025"         # 오류
-CARD_OUTLINE = "#d8d8d4"  # 안쪽 카드 외곽선
-SUBTLE = "#5f6368"      # 안내문구(회색)
-ENTRY_BG = "#fdfdfc"    # 입력칸 배경
-ENTRY_BORDER = "#dadce0"
-CORNER_RADIUS = 12      # 안쪽 카드 모서리 R값(px)
+FONT_SIZE = 11          # 입력 글자 크기(pt) — IME 조합 글꼴도 이 크기로 맞춘다
+META_SIZE = 9           # 하단 줄(언어·상태) 글자 크기
+PAD = 12                # 카드 안쪽 여백(px, 4px 격자)
+STATUS_MAX = 140        # 상태/오류 메시지 최대 길이 — 넘으면 말줄임
+
+# DWM: Win11 둥근 모서리와 테두리 색 (Win10 은 지원하지 않아 호출이 실패한다)
+_DWMWA_WINDOW_CORNER_PREFERENCE = 33
+_DWMWA_BORDER_COLOR = 34
+_DWMWCP_ROUND = 2
 
 
-def _round_rect_points(x1, y1, x2, y2, r):
-    """둥근 사각형 폴리곤 좌표(smooth=True 와 함께 사용)."""
-    return [
-        x1 + r, y1, x2 - r, y1, x2, y1, x2, y1 + r,
-        x2, y2 - r, x2, y2, x2 - r, y2, x1 + r, y2,
-        x1, y2, x1, y2 - r, x1, y1 + r, x1, y1,
-    ]
+def _colorref(hex_color: str) -> int:
+    """'#rrggbb' → Win32 COLORREF(0x00bbggrr)."""
+    r, g, b = (int(hex_color[i:i + 2], 16) for i in (1, 3, 5))
+    return r | (g << 8) | (b << 16)
+
+
+def _round_native(win: tk.Toplevel) -> bool:
+    """Win11 DWM 으로 창 모서리를 둥글게 하고 외곽선 색을 지정한다. 성공 여부 반환.
+
+    tk 폴리곤은 안티에일리어싱이 안 돼 둥근 모서리가 계단처럼 보이므로 OS 에 맡긴다.
+    실패(Win10 등)하면 호출자가 사각 카드 + 헤어라인으로 그린다.
+    """
+    try:
+        hwnd = _user32.GetParent(win.winfo_id()) or win.winfo_id()
+        pref = ctypes.c_int(_DWMWCP_ROUND)
+        if _dwmapi.DwmSetWindowAttribute(wintypes.HWND(hwnd),
+                                         _DWMWA_WINDOW_CORNER_PREFERENCE,
+                                         ctypes.byref(pref), ctypes.sizeof(pref)) != 0:
+            return False
+        color = wintypes.DWORD(_colorref(OUTLINE))
+        _dwmapi.DwmSetWindowAttribute(wintypes.HWND(hwnd), _DWMWA_BORDER_COLOR,
+                                      ctypes.byref(color), ctypes.sizeof(color))
+        return True
+    except Exception:
+        return False
+
+
+def _lang_label(lang: str) -> str:
+    """언어 버튼 문구 — '베트남어로 ▾'. 목표 언어 이름이 모두 '…어'로 끝나 '로'가 맞다."""
+    return f"{lang}로 ▾"
 
 
 class Popup:
@@ -78,18 +101,19 @@ class Popup:
         self.win = win
         fam = font_family(root)
         self.fam = fam
-        self.font_size = 10
+        self.font_size = FONT_SIZE
         win.overrideredirect(True)
         win.attributes("-topmost", True)
-        win.configure(bg=OUTER)  # 바깥 창은 사각형(둥글지 않음)
+        win.configure(bg=CARD)
 
         # 마우스 커서 근처에 배치
         x, y = root.winfo_pointerxy()
         win.geometry(f"+{x + 12}+{y + 16}")
 
-        # 안쪽 카드만 둥근 모서리: Canvas 위에 둥근 사각형을 그리고 내용을 임베드
-        self.pad = 8  # 카드 안쪽 여백
-        canvas = tk.Canvas(win, bg=OUTER, highlightthickness=0)
+        # 카드: Canvas 에 외곽선 사각형을 그리고 내용을 임베드한다.
+        # 모서리는 아래에서 Win11 DWM 으로 둥글게 하고, 실패하면 사각 + 헤어라인으로 둔다.
+        self.pad = PAD
+        canvas = tk.Canvas(win, bg=CARD, highlightthickness=0)
         canvas.pack()
         self.canvas = canvas
         # 크기/위치는 전적으로 geometry() 로만 제어한다(자동 전파가 위쪽 성장을
@@ -97,32 +121,45 @@ class Popup:
         win.pack_propagate(False)
 
         # 내용은 canvas 의 자식으로 만들어 임베드 렌더링을 보장
-        content = tk.Frame(canvas, bg=BG)
+        content = tk.Frame(canvas, bg=CARD)
         self.content = content
 
         # 멀티라인 입력란: 자동 줄바꿈(wrap)으로 두 줄 이상이 되면 높이를 키운다.
-        # (단일행 Entry 의 1.5배 너비 = 48자). MAX_LINES 까지 자란다.
+        # 팝업 자체가 입력창이므로 테두리 없이 카드 위에 바로 쓴다. MAX_LINES 까지 자란다.
         self.MAX_LINES = 6
         self._cur_lines = 1
-        self.text = tk.Text(content, width=48, height=1, font=(fam, 10),
-                            wrap="word", bg="#ffffff", fg=FG,
-                            insertbackground=FG, relief="solid", bd=1,
-                            highlightthickness=0, padx=4, pady=2, undo=True)
+        self.text = tk.Text(content, width=44, height=1, font=(fam, FONT_SIZE),
+                            wrap="word", bg=CARD, fg=TEXT1,
+                            insertbackground=TEXT1, relief="flat", bd=0,
+                            highlightthickness=0, padx=0, pady=0, undo=True)
         self.text.pack(fill="x")
 
-        bottom = tk.Frame(content, bg=BG)
-        bottom.pack(fill="x", pady=(3, 0))
-        tk.Label(bottom, text="Enter 번역·삽입 · Esc 취소", bg=BG, fg=SUBTLE,
-                 font=(fam, 6, "bold")).pack(side="right")
+        # 상태/오류 줄 — 메시지가 있을 때만 보인다(set_status 에서 pack/forget).
+        # 하단 줄과 분리하고 줄바꿈해서, 긴 오류가 팝업 폭을 밀어내지 않게 한다.
+        self.status = tk.Label(content, text="", bg=CARD, fg=ACCENT,
+                               font=(fam, META_SIZE), anchor="w", justify="left")
+
+        self._sep = tk.Frame(content, bg=HAIRLINE, height=1)
+        self._sep.pack(fill="x", pady=(PAD, 8))
+
+        bottom = tk.Frame(content, bg=CARD)
+        bottom.pack(fill="x")
+        # 키 안내: [Enter] 번역  [Esc] 취소 — 키캡은 이 앱의 시그니처 요소
+        hint = tk.Frame(bottom, bg=CARD)
+        hint.pack(side="right")
+        for i, (key, label) in enumerate((("Enter", "번역"), ("Esc", "취소"))):
+            keycap(hint, key, fam).pack(side="left", padx=(12 if i else 0, 4))
+            tk.Label(hint, text=label, bg=CARD, fg=TEXT3,
+                     font=(fam, META_SIZE)).pack(side="left")
         # 목표 언어 드롭다운 — 여기서 바꾸면 이번 번역부터 바로 적용된다.
         self._lang_btn: tk.Menubutton | None = None
         if languages:
             self._lang_var = tk.StringVar(value=language)
-            mb = tk.Menubutton(bottom, text=f"{language} ▾", bg=BG, fg=ACCENT,
-                               font=(fam, 8), relief="flat", cursor="hand2",
-                               activebackground=BG, activeforeground=ACCENT,
-                               takefocus=0, padx=2, pady=0)
-            menu = tk.Menu(mb, tearoff=0, font=(fam, 9))
+            mb = tk.Menubutton(bottom, text=_lang_label(language), bg=CARD, fg=ACCENT,
+                               font=(fam, META_SIZE), relief="flat", cursor="hand2",
+                               activebackground=CARD, activeforeground=ACCENT,
+                               takefocus=0, padx=0, pady=0, bd=0)
+            menu = tk.Menu(mb, tearoff=0, font=(fam, META_SIZE + 1))
             for lang in languages:
                 menu.add_radiobutton(label=lang, variable=self._lang_var,
                                      value=lang,
@@ -130,17 +167,15 @@ class Popup:
             mb.configure(menu=menu)
             mb.pack(side="left")
             self._lang_btn = mb
-        self.status = tk.Label(bottom, text="", bg=BG, fg=ACCENT,
-                               font=(fam, 8), anchor="w")
-        self.status.pack(side="left", fill="x", expand=True)
 
         content.update_idletasks()
+        # 상태 줄은 입력란 폭에서 줄바꿈 — 폭이 늘어나 레이아웃이 깨지지 않는다.
+        self.status.configure(wraplength=self.text.winfo_reqwidth())
         cw = content.winfo_reqwidth() + 2 * self.pad
         ch = content.winfo_reqheight() + 2 * self.pad
         canvas.config(width=cw, height=ch)
-        self._poly = canvas.create_polygon(
-            _round_rect_points(0, 0, cw - 1, ch - 1, CORNER_RADIUS),
-            smooth=True, fill=BG, outline=CARD_OUTLINE)
+        self._poly = canvas.create_rectangle(0, 0, cw - 1, ch - 1,
+                                             fill=CARD, outline=OUTLINE)
         self._embed = canvas.create_window(self.pad, self.pad, anchor="nw",
                                            window=content)
 
@@ -171,6 +206,9 @@ class Popup:
 
         win.update_idletasks()
         win.deiconify()
+        # Win11: OS 가 모서리를 둥글게 하고 외곽선도 그리므로 캔버스 외곽선은 숨긴다.
+        if _round_native(win):
+            canvas.itemconfigure(self._poly, outline=CARD)
         self._force_foreground()
         # 일부 환경에선 한 번에 포커스를 못 가져오므로 여러 번 재시도 + 준비완료 표시
         win.after(60, self._force_foreground)
@@ -253,7 +291,7 @@ class Popup:
         self._relayout()
 
     def _relayout(self) -> None:
-        """입력란 높이 변화에 맞춰 둥근 카드/창 크기를 다시 그리고,
+        """입력란 높이 변화에 맞춰 카드/창 크기를 다시 그리고,
         아래 모서리를 고정한 채 창을 위로 키운다."""
         if not self.win.winfo_exists():
             return
@@ -261,9 +299,7 @@ class Popup:
         cw = self.content.winfo_reqwidth() + 2 * self.pad
         ch = self.content.winfo_reqheight() + 2 * self.pad
         self.canvas.config(width=cw, height=ch)
-        self.canvas.coords(
-            self._poly,
-            *_round_rect_points(0, 0, cw - 1, ch - 1, CORNER_RADIUS))
+        self.canvas.coords(self._poly, 0, 0, cw - 1, ch - 1)
         # canvas 크기 변경이 예약한 geometry 전파를 먼저 소진시킨 뒤,
         # 위치(위로 성장)를 마지막에 확정해야 전파가 top 을 되돌리지 못한다.
         self.win.update_idletasks()
@@ -298,7 +334,7 @@ class Popup:
     def _set_language(self, lang: str) -> None:
         """언어 드롭다운 선택 — 표시 갱신 후 상위(App)에 알리고 입력란에 재포커스."""
         if self._lang_btn is not None:
-            self._lang_btn.configure(text=f"{lang} ▾")
+            self._lang_btn.configure(text=_lang_label(lang))
         if self.on_language_change is not None:
             self.on_language_change(lang)
         self.text.focus_set()
@@ -312,21 +348,31 @@ class Popup:
             self.close()
             return "break"
         self._submitted = True
-        self.text.configure(state="disabled")
-        self.set_status("번역 중...", ACCENT)
+        # 번역 중에는 입력이 잠겼다는 것을 글자색으로 보여준다.
+        self.text.configure(state="disabled", fg=TEXT3)
+        self.set_status("번역 중…", ACCENT)
         self.on_submit(text)
         return "break"
 
     def set_status(self, message: str, color: str = ACCENT) -> None:
-        if self.win.winfo_exists():
-            self.status.configure(text=message, fg=color)
+        """상태 줄을 보이거나(메시지 있음) 숨긴다. 줄이 생기면 팝업이 위로 자란다."""
+        if not self.win.winfo_exists():
+            return
+        if len(message) > STATUS_MAX:
+            message = message[:STATUS_MAX - 1] + "…"
+        self.status.configure(text=message, fg=color)
+        if message and not self.status.winfo_ismapped():
+            self.status.pack(fill="x", pady=(8, 0), before=self._sep)
+        elif not message:
+            self.status.pack_forget()
+        self._relayout()
 
     def show_error(self, message: str) -> None:
         """번역 실패 시: 오류 표시 후 다시 입력할 수 있게 되돌린다."""
         if not self.win.winfo_exists():
             return
         self._submitted = False
-        self.text.configure(state="normal")
+        self.text.configure(state="normal", fg=TEXT1)
         self.text.focus_set()
         self.set_status(message, ERR)
 
