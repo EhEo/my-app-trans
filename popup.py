@@ -147,7 +147,10 @@ class Popup:
         # 키 안내: [Enter] 번역  [Esc] 취소 — 키캡은 이 앱의 시그니처 요소
         hint = tk.Frame(bottom, bg=CARD)
         hint.pack(side="right")
-        for i, (key, label) in enumerate((("Enter", "번역"), ("Esc", "취소"))):
+        keys = (("Enter", "번역"), ("Esc", "취소"))
+        if languages:
+            keys = (("Shift+Tab", "언어"),) + keys
+        for i, (key, label) in enumerate(keys):
             keycap(hint, key, fam).pack(side="left", padx=(12 if i else 0, 4))
             tk.Label(hint, text=label, bg=CARD, fg=TEXT3,
                      font=(fam, META_SIZE)).pack(side="left")
@@ -190,6 +193,10 @@ class Popup:
         self.text.bind("<KP_Enter>", self._submit)
         self.text.bind("<Shift-Return>", self._on_shift_return)
         win.bind("<Escape>", lambda e: self.close())
+        # Shift+Tab = 목표 언어를 다음 것으로 순환. 위젯에 직접 묶어 "break" 해야
+        # Text 클래스 기본 동작과 'all' 의 포커스 이동(tk_focusPrev)이 실행되지 않는다.
+        self._languages = list(languages or [])
+        self.text.bind("<Shift-Tab>", self._cycle_language)
         # tk 기본 바인딩('all' 태그)은 단독 Alt keyup/F10 을 메뉴 활성화로 해석해
         # 첫 Menubutton 메뉴를 자동으로 연다. inject.release_modifiers() 가 팝업 직전
         # Alt keyup 을 주입하므로 언어 메뉴가 저절로 열린다 → toplevel 바인딩이
@@ -338,6 +345,17 @@ class Popup:
         if self.on_language_change is not None:
             self.on_language_change(lang)
         self.text.focus_set()
+
+    def _cycle_language(self, _event=None) -> str:
+        """Shift+Tab — 목록의 다음 언어로 바꾼다(마지막 다음은 처음). 번역 중엔 무시."""
+        if self._submitted or not self._languages:
+            return "break"
+        cur = self._lang_var.get()
+        i = self._languages.index(cur) if cur in self._languages else -1
+        nxt = self._languages[(i + 1) % len(self._languages)]
+        self._lang_var.set(nxt)
+        self._set_language(nxt)
+        return "break"
 
     def _submit(self, _event=None) -> str:
         # "break" 를 돌려 Text 기본 동작(개행 삽입)을 막고 제출로만 처리한다.

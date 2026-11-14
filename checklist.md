@@ -31,3 +31,10 @@
 - [x] 재캡처로 확인 + 단위 테스트 + 위젯 기능 회귀 검사
 - [x] 커밋 (77af4b4, 90ef7ec)
 - [ ] (실기기 확인 필요) 실제 단축키로 팝업 → 한글 입력 → 붙여넣기, Win10 사각 폴백 화면
+
+## 팝업 Shift+Tab 언어 순환 (2026-11-14)
+
+- [x] 충돌 검토: 전역 단축키는 Tab 을 못 씀(키 1글자 입력, parse_hotkey 가 tab 미지원), 팝업 중 전역 등록은 Esc 뿐
+- [x] `popup.py`, 입력란에 `<Shift-Tab>` 바인딩 + "break" 로 tk 기본 포커스 이동 차단, 번역 중엔 무시
+- [x] 하단 키 안내에 [Shift+Tab] 언어 추가, README 사용법 갱신
+- [x] 단위 테스트(`tests/test_popup_language_cycle.py`) + 실제 키 입력(keybd_event) 확인
